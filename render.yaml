@@ -1,0 +1,29 @@
+# Render.com Blueprint — one-click deploy.
+# https://render.com/docs/blueprint-spec
+#
+# After connecting the repo, Render reads this file and provisions the
+# service automatically. You'll still need to set GOOGLE_MAPS_API_KEY as
+# a secret env var in the dashboard (it's marked sync: false below so
+# Render will prompt you for it).
+services:
+  - type: web
+    name: pca-siting
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      streamlit run app.py
+      --server.port=$PORT
+      --server.address=0.0.0.0
+      --server.headless=true
+      --browser.gatherUsageStats=false
+      --server.enableCORS=false
+      --server.enableXsrfProtection=false
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false        # prompt me, don't sync from another service
+      - key: PYTHON_VERSION
+        value: "3.11"
