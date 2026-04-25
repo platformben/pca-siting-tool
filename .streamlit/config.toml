@@ -1,0 +1,17 @@
+# PCA Scout — Streamlit theme.
+# Maps the four PCA brand canon colors onto Streamlit's theme tokens.
+# Indigo = primary, lavender wash = secondary surface, near-black = text.
+
+[theme]
+primaryColor = "#36286f"            # PCA indigo
+backgroundColor = "#ffffff"         # white
+secondaryBackgroundColor = "#f5f2fa"# lavender tinted ~10% (semantic surface.subtle)
+textColor = "#1a1816"               # near-black
+font = "sans serif"                 # CSS overrides this with Geist
+base = "light"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

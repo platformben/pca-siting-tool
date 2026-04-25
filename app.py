@@ -4,32 +4,28 @@ Run: streamlit run app.py
 """
 from __future__ import annotations
 
+from collections import Counter
+
 import requests
 import streamlit as st
 from dotenv import load_dotenv
 from streamlit_searchbox import st_searchbox
 
-from siting import search_log
+from siting import branding, search_log
 from siting.evaluator import evaluate
 from siting.sources import google_places
 from siting.sources.google_places import PRICE_LEVEL_NUM
 
 load_dotenv()
 
-STATUS_ICON = {
-    "pass": ":material/check_circle:",
-    "fail": ":material/cancel:",
-    "warn": ":material/warning:",
-    "info": ":material/info:",
-}
-STATUS_COLOR = {"pass": "green", "fail": "red", "warn": "orange", "info": "blue"}
-
 
 st.set_page_config(
     page_title="PCA Scout",
-    page_icon="🌿",
+    page_icon=branding.page_icon_path(),
     layout="wide",
 )
+
+branding.apply()
 
 
 def _autocomplete(query: str) -> list[tuple[str, str]]:
@@ -68,8 +64,16 @@ def _autocomplete(query: str) -> list[tuple[str, str]]:
     return out
 
 
-st.title("PCA Scout")
-st.caption("NY OCM compliance + commercial snapshot for a candidate dispensary address. **OCM** = NY State Office of Cannabis Management.")
+# ---------- Hero ----------
+
+branding.hero(
+    title_html="PCA <em>Scout</em>",
+    sub_html=(
+        "Real estate due diligence for <em>independent</em> dispensary operators. "
+        "OCM compliance gates and a commercial snapshot, on any address."
+    ),
+    ref="LOCATION REVIEW",
+)
 
 
 @st.dialog("Search log", width="large")
@@ -86,7 +90,7 @@ def _show_log_dialog() -> None:
         st.download_button(
             label="Download .xlsx",
             data=search_log.to_xlsx_bytes(),
-            file_name="pca-siting-log.xlsx",
+            file_name="pca-scout-log.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -94,9 +98,14 @@ def _show_log_dialog() -> None:
         if st.button("Clear log", use_container_width=True):
             search_log.clear()
             st.rerun()
-    st.caption("⚠️ Log lives only in this browser session — download before closing the tab.")
+    st.caption("Log lives only in this browser session — download before closing the tab.")
 
-_autocomplete_source = "Google Places (US-wide)" if google_places.has_key() else "NYC only (no API key)"
+
+# ---------- Address input ----------
+
+_autocomplete_source = (
+    "Google Places · US-wide" if google_places.has_key() else "NYC only · no API key"
+)
 selected = st_searchbox(
     _autocomplete,
     key="address_search",
@@ -108,12 +117,15 @@ selected = st_searchbox(
 
 col_submit, col_info = st.columns([1, 3])
 with col_submit:
-    run_now = st.button("Evaluate", type="primary", disabled=not selected)
+    run_now = st.button("Evaluate", type="primary", disabled=not selected, use_container_width=True)
 with col_info:
     st.caption(f"Address suggestions: {_autocomplete_source}")
 
+
+# ---------- Result rendering ----------
+
 if run_now and selected:
-    with st.spinner("Geocoding + running OCM checks…"):
+    with st.spinner("Geocoding and running compliance checks…"):
         result = evaluate(selected.strip())
         search_log.record(result)
 
@@ -122,94 +134,123 @@ if run_now and selected:
         st.stop()
 
     geo = result.geo
-    overall_color = {"PASS": "green", "REVIEW": "orange", "FAIL": "red"}[result.overall]
-    st.subheader(f"Overall: :{overall_color}[{result.overall}]")
-    st.write(f"**Resolved:** {geo.address} · lat {geo.lat:.5f}, lon {geo.lon:.5f}"
-             + (f" · BBL {geo.bbl}" if geo.bbl else ""))
+    branding.overall_verdict(result.overall)
+
+    bbl_html = (
+        f"<span style='font-family:Geist Mono,monospace;font-size:0.8125rem;color:{branding.TEXT_SECONDARY};'>"
+        f" · BBL {geo.bbl}</span>"
+        if geo.bbl else ""
+    )
+    st.markdown(
+        f"<div style='font-size:0.95rem;color:{branding.NEAR_BLACK};margin-bottom:0.75rem;'>"
+        f"<strong>Resolved:</strong> {geo.address}"
+        f" <span style='font-family:Geist Mono,monospace;color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+        f"({geo.lat:.5f}, {geo.lon:.5f})</span>"
+        f"{bbl_html}</div>",
+        unsafe_allow_html=True,
+    )
     st.link_button(
-        "Open in Google Maps (cross-check schools/churches)",
+        "Open in Google Maps — cross-check schools and houses of worship",
         f"https://www.google.com/maps/search/?api=1&query={geo.lat},{geo.lon}",
     )
 
-    st.divider()
-    st.subheader("OCM compliance")
+    # ---------- Compliance ----------
+    branding.section("Compliance")
     st.caption(
-        "Gates come from NY Cannabis Law § 72: 1,000 / 2,000 ft from other dispensaries, "
+        "Gates from NY Cannabis Law § 72: 1,000 / 2,000 ft from another dispensary, "
         "500 ft + same street from pre-K – HS schools, 200 ft from buildings exclusively used as houses of worship."
     )
     for f in result.findings:
-        icon = STATUS_ICON.get(f.status, "")
-        color = STATUS_COLOR.get(f.status, "gray")
         with st.container(border=True):
-            st.markdown(f"{icon} **{f.rule}** — :{color}[{f.summary}]")
+            branding.finding_header(f.rule, f.status, f.summary)
             for d in f.details:
                 st.caption(d)
             if f.evidence:
                 with st.expander(f"Evidence ({len(f.evidence)})"):
                     st.dataframe(f.evidence, use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("Commercial snapshot")
+    # ---------- Commercial snapshot ----------
+    branding.section("Commercial snapshot")
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("**Nearest subway stations (2023 ridership)**")
-        if not result.nearest_stations:
-            st.caption("No stations loaded — check internet connection.")
-        for s in result.nearest_stations:
+        nearest = result.nearest_stations[0] if result.nearest_stations else None
+        if nearest:
+            wd = (
+                f"{int(nearest.ridership.weekday_2023):,}"
+                if nearest.ridership and nearest.ridership.weekday_2023
+                else "—"
+            )
+            rk = (
+                f" · #{nearest.ridership.rank_2023} citywide"
+                if nearest.ridership and nearest.ridership.rank_2023
+                else ""
+            )
+            branding.stat_band(
+                "Nearest subway",
+                f"{wd}",
+                f"{nearest.stop_name} ({nearest.routes}) · {nearest.distance_ft:,.0f} ft · "
+                f"avg weekday ridership 2023{rk}",
+            )
+        else:
+            st.caption("Nearest subway unavailable.")
+        # Show 2nd and 3rd nearest as supporting bullets (not full bands)
+        for s in result.nearest_stations[1:3]:
             wd = f"{int(s.ridership.weekday_2023):,}" if s.ridership and s.ridership.weekday_2023 else "—"
-            rk = f"#{s.ridership.rank_2023}" if s.ridership and s.ridership.rank_2023 else ""
-            st.write(
-                f"• **{s.stop_name}** ({s.routes}) · "
-                f"{s.distance_ft:,.0f} ft · avg weekday {wd} {rk}"
+            st.markdown(
+                f"<div style='font-size:0.875rem;color:{branding.TEXT_SECONDARY};margin:0.25rem 0 0 0.25rem;'>"
+                f"• {s.stop_name} ({s.routes}) · {s.distance_ft:,.0f} ft · {wd}/weekday</div>",
+                unsafe_allow_html=True,
             )
 
     with col_b:
-        st.markdown("**Demographics (Census tract)**")
         d = result.demographics
-        if not d:
-            st.caption("Demographics unavailable.")
+        if d and d.mhhi:
+            branding.stat_band(
+                "Census tract MHHI",
+                f"${d.mhhi:,}",
+                f"Tract {d.tract_fips} · population {d.total_population:,}"
+                if d.total_population else f"Tract {d.tract_fips}",
+            )
         else:
-            mhhi = f"${d.mhhi:,}" if d.mhhi else "—"
-            pop = f"{d.total_population:,}" if d.total_population else "—"
-            st.write(f"• Tract FIPS: {d.tract_fips}")
-            st.write(f"• Median HHI: {mhhi}")
-            st.write(f"• Tract population: {pop}")
+            st.caption("Census demographics unavailable.")
 
-    st.divider()
+    # ---------- Co-tenants, coffee, attractions ----------
     comm = result.commercial
     if comm and comm.has_places_key:
-        st.subheader("Co-tenants, coffee & attractions (Google Places)")
+        branding.section("Operator economy")
 
         col_x, col_y = st.columns(2)
         with col_x:
-            st.markdown("**Coffee index** (nearest 10 within 1,000 ft)")
+            st.markdown(
+                f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin-bottom:0.5rem;'>COFFEE INDEX · 1,000 FT</div>",
+                unsafe_allow_html=True,
+            )
             cs = comm.coffee_summary or {}
             if not comm.coffee:
                 st.caption("No coffee shops within 1,000 ft.")
             else:
-                # Dollar range
                 lo, hi = cs.get("dollar_low"), cs.get("dollar_high")
                 if lo and hi:
-                    range_str = f"~${lo}–${hi} per cup (typical)"
+                    range_str = f"~${lo}–${hi} per cup"
                 elif lo:
                     range_str = f"~${lo}+ per cup"
                 else:
                     range_str = "price not reported"
-                # Bean rating
                 bean = cs.get("bean_rating")
                 avg_rating = cs.get("avg_rating")
-                if bean:
-                    bean_viz = "🫘" * bean + "·" * (5 - bean)
-                    bean_str = f"{bean_viz}  ({bean}/5 — avg Google rating {avg_rating})"
-                else:
-                    bean_str = "—"
-
-                st.write(f"• **{cs['count']}** coffee shops in radius")
-                st.write(f"• **{range_str}**")
-                st.write(f"• Quality: {bean_str}")
-                if cs.get("brands"):
-                    st.write("• Brand presence: " + ", ".join(cs["brands"]))
+                bean_str = (
+                    f"{'🫘' * bean}{'·' * (5 - bean)} · {bean}/5 (avg Google rating {avg_rating})"
+                    if bean else "—"
+                )
+                branding.stat_band(
+                    f"{cs['count']} coffee shops",
+                    range_str,
+                    f"Quality {bean_str}"
+                    + (f" · brands: {', '.join(cs['brands'])}" if cs.get("brands") else ""),
+                )
                 if cs.get("nearest"):
                     n = cs["nearest"]
                     pr = n.price_range
@@ -217,9 +258,14 @@ if run_now and selected:
                         npr = f"${pr['start']}–${pr['end']}"
                     else:
                         npr = {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(
-                            PRICE_LEVEL_NUM.get(n.price_level), "—")
-                    st.write(f"• Nearest: **{n.name}** · {n.distance_ft:,.0f} ft · {npr}")
-
+                            PRICE_LEVEL_NUM.get(n.price_level), "—"
+                        )
+                    st.markdown(
+                        f"<div style='font-size:0.875rem;color:{branding.TEXT_SECONDARY};margin-top:-0.25rem;'>"
+                        f"Nearest: <strong style='color:{branding.NEAR_BLACK};'>{n.name}</strong> · "
+                        f"{n.distance_ft:,.0f} ft · {npr}</div>",
+                        unsafe_allow_html=True,
+                    )
                 with st.expander(f"All coffee ({len(comm.coffee)})"):
                     rows = [
                         {
@@ -240,15 +286,22 @@ if run_now and selected:
                     st.dataframe(rows, use_container_width=True, hide_index=True)
 
         with col_y:
-            st.markdown("**Co-tenants** (within 500 ft)")
+            st.markdown(
+                f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin-bottom:0.5rem;'>CO-TENANTS · 500 FT</div>",
+                unsafe_allow_html=True,
+            )
             if not comm.cotenants:
                 st.caption("No co-tenants found in radius.")
             else:
-                st.write(f"**{len(comm.cotenants)}** businesses")
-                from collections import Counter
                 type_mix = Counter([p.primary_type or "other" for p in comm.cotenants])
                 top_types = ", ".join(f"{t} ({n})" for t, n in type_mix.most_common(5))
-                st.caption(f"Top types: {top_types}")
+                branding.stat_band(
+                    f"{len(comm.cotenants)} businesses",
+                    f"{type_mix.most_common(1)[0][0] if type_mix else '—'}",
+                    f"Top types: {top_types}",
+                )
                 with st.expander(f"All co-tenants ({len(comm.cotenants)})"):
                     rows = [
                         {
@@ -263,19 +316,31 @@ if run_now and selected:
                     ]
                     st.dataframe(rows, use_container_width=True, hide_index=True)
 
-        # Major attractions — full-width row below the two-column grid.
-        st.markdown("**Major attractions** (within ¼ mile · 1,320 ft)")
+        # Attractions — full-width row beneath the two-column grid
+        st.markdown(
+            f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+            f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+            f"margin:1.25rem 0 0.5rem 0;'>MAJOR ATTRACTIONS · ¼ MILE</div>",
+            unsafe_allow_html=True,
+        )
         if not comm.attractions:
             st.caption("No major attractions in radius (filter: 100+ reviews or 4.4★ with 20+ reviews).")
         else:
-            st.write(f"**{len(comm.attractions)}** attractions ranked by popularity (review count).")
-            top = comm.attractions[:5]
-            for a in top:
+            st.markdown(
+                f"<div style='font-size:0.9rem;color:{branding.NEAR_BLACK};margin-bottom:0.5rem;'>"
+                f"<strong>{len(comm.attractions)}</strong> attractions ranked by popularity.</div>",
+                unsafe_allow_html=True,
+            )
+            for a in comm.attractions[:5]:
                 stars = f"★ {a.rating}" if a.rating else "—"
                 reviews = f"{a.rating_count:,} reviews" if a.rating_count else ""
-                st.write(
-                    f"• **{a.name}** ({a.primary_type or 'attraction'}) · "
-                    f"{a.distance_ft:,.0f} ft · {stars} · {reviews}"
+                st.markdown(
+                    f"<div style='font-size:0.9rem;margin:0.2rem 0;'>"
+                    f"• <strong>{a.name}</strong> "
+                    f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                    f"({a.primary_type or 'attraction'}) · {a.distance_ft:,.0f} ft · {stars} · {reviews}"
+                    f"</span></div>",
+                    unsafe_allow_html=True,
                 )
             with st.expander(f"All attractions ({len(comm.attractions)})"):
                 rows = [
@@ -291,23 +356,24 @@ if run_now and selected:
                 ]
                 st.dataframe(rows, use_container_width=True, hide_index=True)
     elif comm is not None and not comm.has_places_key:
-        st.info("Add a `GOOGLE_MAPS_API_KEY` to `.env` (or Streamlit Cloud Secrets) to unlock co-tenants, coffee, and attractions.")
+        st.info("Add a `GOOGLE_MAPS_API_KEY` to unlock co-tenants, coffee, and attractions.")
 
-    st.divider()
-    with st.expander("To-do (not yet automated)"):
+    with st.expander("Roadmap — not yet automated"):
         st.markdown(
-            "- Corner-lot detection via NYC PLUTO geometry (automated same-street check)\n"
-            "- Population density (needs TIGER land area)\n"
+            "- Corner-lot detection via NYC PLUTO geometry\n"
+            "- Population density via TIGER land area\n"
             "- Alerting on new listings (Phase 2)\n"
-            "- Multi-state rules modules (Phase 3)"
+            "- Multi-state rulesets (Phase 3)"
         )
 
-# Discrete log button — always visible, sits at the bottom regardless of
-# whether an evaluation has been run. Stays out of the way.
-st.divider()
+
+# ---------- Footer: discrete log access + brand sign-off ----------
+
 _n = search_log.count()
-_log_label = f"📋 Search log ({_n})" if _n else "📋 Search log"
+_log_label = f"Search log ({_n})" if _n else "Search log"
 _l, _r = st.columns([3, 1])
 with _r:
     if st.button(_log_label, use_container_width=True, type="secondary"):
         _show_log_dialog()
+
+branding.signoff()
