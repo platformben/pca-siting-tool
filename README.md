@@ -1,4 +1,4 @@
-# PCA Siting Tool
+# PCA Scout
 
 Evaluate a candidate dispensary address against New York OCM siting rules and pull a basic commercial snapshot. Phase 1 = single-address evaluator. Roadmap: listing-alert feed (Phase 2), multi-state rulesets (Phase 3).
 

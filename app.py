@@ -1,4 +1,4 @@
-"""PCA Siting Tool — Streamlit UI.
+"""PCA Scout — Streamlit UI.
 
 Run: streamlit run app.py
 """
@@ -26,7 +26,7 @@ STATUS_COLOR = {"pass": "green", "fail": "red", "warn": "orange", "info": "blue"
 
 
 st.set_page_config(
-    page_title="PCA Siting Tool",
+    page_title="PCA Scout",
     page_icon="🌿",
     layout="wide",
 )
@@ -68,34 +68,33 @@ def _autocomplete(query: str) -> list[tuple[str, str]]:
     return out
 
 
-st.title("PCA Siting Tool")
+st.title("PCA Scout")
 st.caption("NY OCM compliance + commercial snapshot for a candidate dispensary address. **OCM** = NY State Office of Cannabis Management.")
 
-# Sidebar: search log + xlsx export
-with st.sidebar:
-    st.header("Search log")
+
+@st.dialog("Search log", width="large")
+def _show_log_dialog() -> None:
     n = search_log.count()
     st.caption(f"{n} address{'es' if n != 1 else ''} evaluated this session.")
-    if n:
+    if not n:
+        st.info("Run an evaluation to start logging.")
+        return
+    df = search_log.to_dataframe()
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
         st.download_button(
-            label="Download log as .xlsx",
+            label="Download .xlsx",
             data=search_log.to_xlsx_bytes(),
             file_name="pca-siting-log.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-        with st.expander("Preview last 10"):
-            st.dataframe(
-                search_log.to_dataframe()[["timestamp", "address", "overall"]].tail(10),
-                use_container_width=True,
-                hide_index=True,
-            )
+    with cols[1]:
         if st.button("Clear log", use_container_width=True):
             search_log.clear()
             st.rerun()
-    else:
-        st.caption("Run an evaluation to start logging.")
-    st.caption("⚠️ Log lives only in this browser session — download before closing.")
+    st.caption("⚠️ Log lives only in this browser session — download before closing the tab.")
 
 _autocomplete_source = "Google Places (US-wide)" if google_places.has_key() else "NYC only (no API key)"
 selected = st_searchbox(
@@ -302,3 +301,13 @@ if run_now and selected:
             "- Alerting on new listings (Phase 2)\n"
             "- Multi-state rules modules (Phase 3)"
         )
+
+# Discrete log button — always visible, sits at the bottom regardless of
+# whether an evaluation has been run. Stays out of the way.
+st.divider()
+_n = search_log.count()
+_log_label = f"📋 Search log ({_n})" if _n else "📋 Search log"
+_l, _r = st.columns([3, 1])
+with _r:
+    if st.button(_log_label, use_container_width=True, type="secondary"):
+        _show_log_dialog()
