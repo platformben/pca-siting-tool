@@ -39,6 +39,7 @@ class Place:
     rating: float | None
     rating_count: int | None
     price_level: str | None
+    price_range: dict | None = None  # {"start": int, "end": int, "currency": "USD"}
     distance_ft: float = 0.0
 
 
@@ -85,6 +86,17 @@ def _call(
             plon = float(loc.get("longitude"))
         except (TypeError, ValueError):
             continue
+        pr = p.get("priceRange") or {}
+        price_range = None
+        if pr:
+            try:
+                price_range = {
+                    "start": int(pr.get("startPrice", {}).get("units", 0)),
+                    "end": int(pr.get("endPrice", {}).get("units", 0)) or None,
+                    "currency": pr.get("startPrice", {}).get("currencyCode") or "USD",
+                }
+            except (TypeError, ValueError):
+                price_range = None
         out.append(
             Place(
                 place_id=p.get("id", ""),
@@ -97,6 +109,7 @@ def _call(
                 rating=p.get("rating"),
                 rating_count=p.get("userRatingCount"),
                 price_level=p.get("priceLevel"),
+                price_range=price_range,
             )
         )
     return out
@@ -111,7 +124,7 @@ _PRO_MIX = (
     _ESSENTIALS
     + ",places.formattedAddress,places.rating,places.userRatingCount"
 )
-_ENT_PRICE = _PRO_MIX + ",places.priceLevel"
+_ENT_PRICE = _PRO_MIX + ",places.priceLevel,places.priceRange"
 
 
 def nearby_cotenants(lat: float, lon: float, radius_ft: float = 500.0) -> list[Place]:
@@ -143,6 +156,31 @@ def nearby_worship(lat: float, lon: float, radius_ft: float = 600.0) -> list[Pla
     radius_m = radius_ft / 3.28084
     types = ["church", "mosque", "synagogue", "hindu_temple", "place_of_worship"]
     return _call(lat, lon, types, radius_m, max_results=15, field_mask=_PRO_MIX)
+
+
+def nearby_attractions(lat: float, lon: float, radius_ft: float = 1320.0) -> list[Place]:
+    """Major foot-traffic generators within walking distance (1/4 mile default).
+
+    The Places API (New) `includedTypes` is fussy about mixed categories —
+    some combinations silently return zero. We split into three category
+    calls (culture / commerce / outdoors) and merge results.
+    """
+    radius_m = radius_ft / 3.28084
+    out: list[Place] = []
+    seen: set[str] = set()
+    for category in (
+        ["museum", "art_gallery", "performing_arts_theater", "movie_theater",
+         "tourist_attraction", "library"],
+        ["stadium", "shopping_mall", "hotel", "university"],
+        ["park", "amusement_park", "aquarium", "zoo"],
+    ):
+        for p in _call(lat, lon, category, radius_m, max_results=20,
+                       field_mask=_PRO_MIX):
+            if p.place_id in seen:
+                continue
+            seen.add(p.place_id)
+            out.append(p)
+    return out
 
 
 def autocomplete_address(query: str) -> list[str]:
@@ -183,12 +221,56 @@ def autocomplete_address(query: str) -> list[str]:
 
 
 def summarize_coffee_prices(places: list[Place]) -> dict:
-    """Produce a small summary: count, avg price level, nearest branded shop."""
+    """Summary: count, dollar range, bean rating (1-5), nearest, brands."""
     if not places:
-        return {"count": 0, "avg_price": None, "brands": [], "nearest": None}
+        return {
+            "count": 0,
+            "avg_price_level": None,
+            "dollar_low": None, "dollar_high": None,
+            "bean_rating": None, "avg_rating": None,
+            "brands": [], "nearest": None,
+        }
     levels = [PRICE_LEVEL_NUM[p.price_level] for p in places if p.price_level in PRICE_LEVEL_NUM]
+
+    # Dollar range — average of startPrice / endPrice across shops that
+    # report priceRange. Google's priceRange is meal-level not cup-level,
+    # so we apply a coffee-specific fallback when only priceLevel is known.
+    starts = [p.price_range["start"] for p in places if p.price_range and p.price_range.get("start")]
+    ends = [p.price_range["end"] for p in places if p.price_range and p.price_range.get("end")]
+    if starts and ends:
+        dollar_low = round(sum(starts) / len(starts))
+        dollar_high = round(sum(ends) / len(ends))
+    else:
+        # Fallback mapping (cup-of-coffee dollar bands by Google priceLevel)
+        fallback = {1: (2, 4), 2: (4, 7), 3: (7, 10), 4: (10, 15)}
+        if levels:
+            avg = round(sum(levels) / len(levels))
+            dollar_low, dollar_high = fallback.get(avg, (None, None))
+        else:
+            dollar_low, dollar_high = None, None
+
+    # Bean rating — 1-5 visual, derived from the avg Google rating of the
+    # nearest 5 cafes. Heavier weight to closer shops (proxy for "what
+    # does coffee taste like in this exact spot").
+    near = sorted(places, key=lambda p: p.distance_ft)[:5]
+    rated = [p for p in near if p.rating is not None]
+    avg_rating = round(sum(p.rating for p in rated) / len(rated), 2) if rated else None
+    if avg_rating is None:
+        bean_rating = None
+    elif avg_rating >= 4.5:
+        bean_rating = 5
+    elif avg_rating >= 4.2:
+        bean_rating = 4
+    elif avg_rating >= 3.8:
+        bean_rating = 3
+    elif avg_rating >= 3.3:
+        bean_rating = 2
+    else:
+        bean_rating = 1
+
     brands_of_interest = ("starbucks", "blank street", "gregorys", "joe coffee",
-                          "blue bottle", "dunkin", "think coffee")
+                          "blue bottle", "dunkin", "think coffee", "stumptown",
+                          "la colombe", "intelligentsia", "birch")
     brands = []
     for p in places:
         n = (p.name or "").lower()
@@ -196,10 +278,13 @@ def summarize_coffee_prices(places: list[Place]) -> dict:
             if b in n:
                 brands.append(p.name)
                 break
-    places_sorted = sorted(places, key=lambda p: p.distance_ft)
     return {
         "count": len(places),
-        "avg_price": round(sum(levels) / len(levels), 2) if levels else None,
+        "avg_price_level": round(sum(levels) / len(levels), 2) if levels else None,
+        "dollar_low": dollar_low,
+        "dollar_high": dollar_high,
+        "bean_rating": bean_rating,
+        "avg_rating": avg_rating,
         "brands": sorted(set(brands)),
-        "nearest": places_sorted[0] if places_sorted else None,
+        "nearest": near[0] if near else None,
     }
