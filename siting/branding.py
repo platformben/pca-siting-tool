@@ -67,17 +67,12 @@ def _css() -> str:
       max-width: 1180px;
     }}
 
-    /* Hero wordmark + italic-serif accent headline */
+    /* Hero mark + italic-serif accent headline */
     .pca-hero {{
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
       margin-bottom: 0.5rem;
-    }}
-    .pca-hero__wordmark {{
-      max-width: 220px;
-      margin-bottom: 0.5rem;
-      opacity: 0.95;
     }}
     .pca-hero__title {{
       font-size: 2.75rem;
@@ -296,10 +291,10 @@ ASSETS = Path(__file__).parent / "assets"
 
 
 def hero(title_html: str, sub_html: str, ref: str | None = None) -> None:
-    """Wordmark + headline + sub + monospace metadata reference."""
-    wordmark = ASSETS / "pca-wordmark-dark.png"
-    if wordmark.exists():
-        st.image(str(wordmark), width=240)
+    """Mark + headline + sub + monospace metadata reference."""
+    mark = ASSETS / "brand" / "pca-mark-purple.png"
+    if mark.exists():
+        st.image(str(mark), width=72)
     meta = f"<div class='pca-hero__meta'>REF. PCA · SCOUT · {ref}</div>" if ref else ""
     st.markdown(
         f"""
@@ -393,5 +388,9 @@ def signoff() -> None:
 
 
 def page_icon_path() -> str:
-    """Absolute path to the PCA monogram for use as Streamlit page icon."""
-    return str(ASSETS / "pca-icon-purple.png")
+    """Absolute path to the PCA monogram for use as Streamlit page icon.
+
+    Uses the circular badge variant — the bare monogram's hairlines disappear
+    at favicon size, the inscribed circle keeps the mark legible at 16-32px.
+    """
+    return str(ASSETS / "brand" / "pca-mark-purple-badge.png")
