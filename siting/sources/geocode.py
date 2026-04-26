@@ -90,7 +90,12 @@ def _google_geocode(address: str) -> GeocodeResult | None:
         return None
     first = data["results"][0]
     loc = first["geometry"]["location"]
-    comps = {c["types"][0]: c for c in first.get("address_components", []) if c.get("types")}
+    # Index each component under ALL its types — Google often lists "political"
+    # first for sublocality components, which would hide them from a types[0] lookup.
+    comps: dict[str, dict] = {}
+    for c in first.get("address_components", []):
+        for t in c.get("types", []):
+            comps.setdefault(t, c)
     def _long(kind: str, default: str = "") -> str:
         return (comps.get(kind) or {}).get("long_name", default)
 

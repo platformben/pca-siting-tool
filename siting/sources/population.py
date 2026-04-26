@@ -15,6 +15,10 @@ import requests
 NYC_BOROUGHS = {
     "manhattan", "bronx", "brooklyn", "queens", "staten island",
     "new york", "new york city",
+    # County-form labels — Google sometimes returns these as the "city" when
+    # the address-component picker doesn't surface a sublocality.
+    "kings county", "new york county", "bronx county",
+    "queens county", "richmond county",
 }
 
 ACS_PLACE = "https://api.census.gov/data/2022/acs/acs5"
