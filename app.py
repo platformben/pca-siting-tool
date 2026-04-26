@@ -4,6 +4,7 @@ Run: streamlit run app.py
 """
 from __future__ import annotations
 
+import os
 from collections import Counter
 
 import requests
@@ -11,16 +12,24 @@ import streamlit as st
 from dotenv import load_dotenv
 from streamlit_searchbox import st_searchbox
 
+# Streamlit Community Cloud injects secrets via st.secrets (a TOML file in
+# the dashboard) rather than process env vars. Bridge them into os.environ
+# so the os.getenv() calls in siting/* keep working unchanged. Local dev
+# keeps using .env via load_dotenv() below.
+load_dotenv()
+try:
+    for _k, _v in dict(st.secrets).items():
+        os.environ.setdefault(_k, str(_v))
+except (FileNotFoundError, AttributeError):
+    pass
+
 from siting import branding, search_log
 from siting.sources import google_places
 from siting.sources.google_places import PRICE_LEVEL_NUM
 
 # `evaluate` and its transitive imports (OCM, OSM, NYS Schools, Census, MTA,
 # NYC OpenData, etc.) are deferred until the user clicks Evaluate. Keeping
-# them out of the autocomplete path lowers the resident memory baseline so
-# the app fits Render's 512 MB Starter tier.
-
-load_dotenv()
+# them out of the autocomplete path lowers the resident memory baseline.
 
 
 st.set_page_config(
