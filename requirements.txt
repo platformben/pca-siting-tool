@@ -1,6 +1,7 @@
-streamlit>=1.30
+# Pin Streamlit narrowly: 1.36 is the first version with st.dialog (used by
+# the search-log modal) and is materially lighter than 1.40+. A higher
+# floor would push memory back up and OOM the 512 MB Starter tier.
+streamlit>=1.36,<1.40
 streamlit-searchbox>=0.1.16
 requests>=2.31
 python-dotenv>=1.0
-shapely>=2.0
-pyproj>=3.6

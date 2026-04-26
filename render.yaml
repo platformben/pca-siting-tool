@@ -21,6 +21,10 @@ services:
       --browser.gatherUsageStats=false
       --server.enableCORS=false
       --server.enableXsrfProtection=false
+      --server.fileWatcherType=none
+      --runner.magicEnabled=false
+      --runner.fastReruns=true
+      --client.toolbarMode=minimal
     healthCheckPath: /_stcore/health
     envVars:
       - key: GOOGLE_MAPS_API_KEY

@@ -12,9 +12,13 @@ from dotenv import load_dotenv
 from streamlit_searchbox import st_searchbox
 
 from siting import branding, search_log
-from siting.evaluator import evaluate
 from siting.sources import google_places
 from siting.sources.google_places import PRICE_LEVEL_NUM
+
+# `evaluate` and its transitive imports (OCM, OSM, NYS Schools, Census, MTA,
+# NYC OpenData, etc.) are deferred until the user clicks Evaluate. Keeping
+# them out of the autocomplete path lowers the resident memory baseline so
+# the app fits Render's 512 MB Starter tier.
 
 load_dotenv()
 
@@ -126,8 +130,14 @@ with col_info:
 
 if run_now and selected:
     with st.spinner("Geocoding and running compliance checks…"):
+        # Lazy import — first click pulls in the data clients; subsequent
+        # clicks reuse Python's import cache.
+        from siting.evaluator import evaluate
+        import gc
+
         result = evaluate(selected.strip())
         search_log.record(result)
+        gc.collect()
 
     if not result.geo:
         st.error(result.findings[0].summary if result.findings else "Geocoding failed.")
