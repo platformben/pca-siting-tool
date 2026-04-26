@@ -1,20 +1,33 @@
-"""In-session log of evaluated addresses + xlsx export.
+"""In-session log of evaluated addresses + CSV export.
 
 Streamlit Cloud's filesystem is ephemeral, so we keep the log in
-`st.session_state` and let the user download an xlsx snapshot any time.
-For persistence across sessions, the user re-downloads each time and
-saves the xlsx locally — good enough for v1.
+``st.session_state`` and let the user download a CSV snapshot any
+time. CSV opens straight into Excel; we don't pull pandas/openpyxl
+just for export — Render's free plan doesn't have the headroom.
 """
 from __future__ import annotations
 
+import csv
 import io
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
 import streamlit as st
 
 LOG_KEY = "_pca_search_log"
+
+COLUMNS: list[str] = [
+    "timestamp", "address", "lat", "lon", "bbl", "overall",
+    "dispensary", "schools", "worship", "zoning", "cofo",
+    "nearest_dispensary", "nearest_dispensary_ft",
+    "nearest_school", "nearest_school_ft", "nearest_school_same_street",
+    "nearest_worship", "nearest_worship_ft",
+    "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
+    "tract_mhhi", "tract_population",
+    "coffee_count", "coffee_dollar_low", "coffee_dollar_high",
+    "coffee_bean_rating", "coffee_avg_google_rating", "coffee_brands",
+    "cotenants_count", "attractions_count", "top_attraction",
+]
 
 
 def _log() -> list[dict[str, Any]]:
@@ -99,21 +112,15 @@ def clear() -> None:
     st.session_state[LOG_KEY] = []
 
 
-def to_xlsx_bytes() -> bytes:
-    df = pd.DataFrame(_log())
-    if df.empty:
-        df = pd.DataFrame(columns=["timestamp", "address", "overall"])
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Searches", index=False)
-        # Auto-size columns to ~min(width+2, 60)
-        ws = writer.sheets["Searches"]
-        for i, col in enumerate(df.columns, start=1):
-            max_len = max([len(str(col))] + [len(str(v)) for v in df[col].fillna("")])
-            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = min(max_len + 2, 60)
-    buf.seek(0)
-    return buf.getvalue()
+def to_csv_bytes() -> bytes:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in _log():
+        writer.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in COLUMNS})
+    return buf.getvalue().encode("utf-8")
 
 
-def to_dataframe() -> pd.DataFrame:
-    return pd.DataFrame(_log())
+def to_rows() -> list[dict[str, Any]]:
+    """Return the log as a list of dicts — Streamlit's st.dataframe accepts this directly."""
+    return list(_log())

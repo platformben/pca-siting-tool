@@ -1,23 +1,25 @@
-"""Subway station ridership from the 2023 MTA tables workbook.
+"""Subway station ridership from the 2023 MTA tables.
 
-The workbook's 'Avg Weekday' sheet has station name + borough + per-year
-ridership. We lazy-load it and offer a nearest-station lookup once the
-station is geocoded.
+The xlsx workbook ships in the repo for reference; the runtime reads
+two pre-extracted CSVs in ``data/`` produced by
+``scripts/convert_subway_xlsx.py``. We don't load pandas/openpyxl on
+the request path — Render's free tier doesn't have the headroom.
 """
 from __future__ import annotations
 
+import csv
 import os
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-import pandas as pd
 import requests
 
 from ..geo import haversine_feet
 
-DEFAULT_XLSX = Path(__file__).parents[2] / "2023 Subway Tables.xlsx"
+DATA_DIR = Path(__file__).parents[2] / "data"
+DEFAULT_WEEKDAY = DATA_DIR / "subway_weekday.csv"
+DEFAULT_ANNUAL = DATA_DIR / "subway_annual.csv"
 MTA_STATIONS_URL = "https://data.ny.gov/resource/39hk-dx4f.json"
 
 
@@ -30,37 +32,66 @@ class StationRidership:
     rank_2023: int | None
 
 
-@lru_cache(maxsize=1)
-def load_weekday() -> pd.DataFrame:
-    path = Path(os.getenv("SUBWAY_XLSX", DEFAULT_XLSX))
-    df = pd.read_excel(path, sheet_name="Avg Weekday", header=1)
-    df = df.rename(columns={
-        df.columns[0]: "station",
-        df.columns[1]: "_",
-        df.columns[2]: "boro",
-        df.columns[-4]: "weekday_2023",
-        df.columns[-1]: "rank_2023",
-    })
-    df = df.dropna(subset=["station"]).copy()
-    boro_headers = {"The Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"}
-    df = df[~df["station"].isin(boro_headers)]
-    df = df[df["station"].astype(str).str.strip() != ""]
-    return df[["station", "boro", "weekday_2023", "rank_2023"]].reset_index(drop=True)
+def _parse_float(s: str) -> float | None:
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_int(s: str) -> int | None:
+    f = _parse_float(s)
+    return int(f) if f is not None else None
 
 
 @lru_cache(maxsize=1)
-def load_annual() -> pd.DataFrame:
-    path = Path(os.getenv("SUBWAY_XLSX", DEFAULT_XLSX))
-    df = pd.read_excel(path, sheet_name="Annual Total", header=1)
-    df = df.rename(columns={df.columns[0]: "station", df.columns[-4]: "annual_2023"})
-    df = df.dropna(subset=["station"]).copy()
-    boro_headers = {"The Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"}
-    df = df[~df["station"].isin(boro_headers)]
-    return df[["station", "annual_2023"]].reset_index(drop=True)
+def _weekday_index() -> dict[str, dict]:
+    """station name -> {boro, weekday_2023, rank_2023}."""
+    path = Path(os.getenv("SUBWAY_WEEKDAY_CSV", DEFAULT_WEEKDAY))
+    out: dict[str, dict] = {}
+    if not path.exists():
+        return out
+    with path.open(newline="") as fh:
+        for row in csv.DictReader(fh):
+            station = (row.get("station") or "").strip()
+            if not station:
+                continue
+            out[station] = {
+                "boro": (row.get("boro") or "").strip(),
+                "weekday_2023": _parse_float(row.get("weekday_2023") or ""),
+                "rank_2023": _parse_int(row.get("rank_2023") or ""),
+            }
+    return out
+
+
+@lru_cache(maxsize=1)
+def _annual_index() -> dict[str, float]:
+    """station name -> annual_2023 ridership."""
+    path = Path(os.getenv("SUBWAY_ANNUAL_CSV", DEFAULT_ANNUAL))
+    out: dict[str, float] = {}
+    if not path.exists():
+        return out
+    with path.open(newline="") as fh:
+        for row in csv.DictReader(fh):
+            station = (row.get("station") or "").strip()
+            if not station:
+                continue
+            v = _parse_float(row.get("annual_2023") or "")
+            if v is not None:
+                out[station] = v
+    return out
 
 
 def _strip_lines(name: str) -> str:
+    """Strip the trailing line list, e.g. '138 St-Grand Concourse (4,5)' -> '138 St-Grand Concourse'."""
+    import re
     return re.sub(r"\s*\([^)]+\)\s*$", "", name).strip()
+
+
+@lru_cache(maxsize=1)
+def _weekday_by_stripped() -> dict[str, str]:
+    """Lowercased line-stripped name -> the original station key in the weekday index."""
+    return {_strip_lines(k).lower(): k for k in _weekday_index()}
 
 
 @dataclass
@@ -75,47 +106,58 @@ class NearestStation:
 
 
 @lru_cache(maxsize=1)
-def load_mta_stations() -> pd.DataFrame:
+def load_mta_stations() -> list[dict]:
+    """Pull MTA station list from the NY Open Data SODA API.
+
+    Returns a list of dicts (not a DataFrame). Each dict has at least
+    ``stop_name``, ``borough``, ``daytime_routes``, ``lat``, ``lon``.
+    """
     try:
         r = requests.get(MTA_STATIONS_URL, params={"$limit": "5000"}, timeout=20)
         r.raise_for_status()
     except requests.RequestException:
-        return pd.DataFrame()
+        return []
     rows = r.json()
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-    df["lat"] = pd.to_numeric(df["gtfs_latitude"], errors="coerce")
-    df["lon"] = pd.to_numeric(df["gtfs_longitude"], errors="coerce")
-    return df.dropna(subset=["lat", "lon"]).reset_index(drop=True)
+    out: list[dict] = []
+    for row in rows:
+        lat = _parse_float(row.get("gtfs_latitude"))
+        lon = _parse_float(row.get("gtfs_longitude"))
+        if lat is None or lon is None:
+            continue
+        out.append({
+            "stop_name": row.get("stop_name") or "",
+            "borough": row.get("borough") or "",
+            "daytime_routes": row.get("daytime_routes") or "",
+            "lat": lat,
+            "lon": lon,
+        })
+    return out
 
 
 def nearest_stations(lat: float, lon: float, n: int = 3) -> list[NearestStation]:
     stations = load_mta_stations()
-    if stations.empty:
+    if not stations:
         return []
-    dists = [
-        (i, haversine_feet(lat, lon, row.lat, row.lon))
-        for i, row in stations.iterrows()
-    ]
-    dists.sort(key=lambda x: x[1])
-    out = []
+    ranked = sorted(
+        ((s, haversine_feet(lat, lon, s["lat"], s["lon"])) for s in stations),
+        key=lambda x: x[1],
+    )
+    out: list[NearestStation] = []
     seen: set[str] = set()
-    for i, d in dists:
-        row = stations.iloc[i]
-        key = row["stop_name"]
+    for s, d in ranked:
+        key = s["stop_name"]
         if key in seen:
             continue
         seen.add(key)
         out.append(
             NearestStation(
-                stop_name=row["stop_name"],
-                borough=row.get("borough", ""),
-                routes=row.get("daytime_routes", ""),
-                lat=float(row["lat"]),
-                lon=float(row["lon"]),
+                stop_name=s["stop_name"],
+                borough=s["borough"],
+                routes=s["daytime_routes"],
+                lat=s["lat"],
+                lon=s["lon"],
                 distance_ft=d,
-                ridership=lookup_station(row["stop_name"]),
+                ridership=lookup_station(s["stop_name"]),
             )
         )
         if len(out) >= n:
@@ -124,26 +166,17 @@ def nearest_stations(lat: float, lon: float, n: int = 3) -> list[NearestStation]
 
 
 def lookup_station(name: str) -> StationRidership | None:
-    weekday = load_weekday()
-    annual = load_annual()
+    weekday = _weekday_index()
+    annual = _annual_index()
     needle = _strip_lines(name).lower()
-    for _, row in weekday.iterrows():
-        if _strip_lines(str(row["station"])).lower() == needle:
-            ann = annual[annual["station"] == row["station"]]
-            annual_val = float(ann["annual_2023"].iloc[0]) if not ann.empty else None
-            try:
-                wd = float(row["weekday_2023"])
-            except (TypeError, ValueError):
-                wd = None
-            try:
-                rk = int(row["rank_2023"])
-            except (TypeError, ValueError):
-                rk = None
-            return StationRidership(
-                station=str(row["station"]),
-                borough=str(row["boro"]),
-                weekday_2023=wd,
-                annual_2023=annual_val,
-                rank_2023=rk,
-            )
-    return None
+    station_key = _weekday_by_stripped().get(needle)
+    if not station_key:
+        return None
+    rec = weekday[station_key]
+    return StationRidership(
+        station=station_key,
+        borough=rec["boro"],
+        weekday_2023=rec["weekday_2023"],
+        annual_2023=annual.get(station_key),
+        rank_2023=rec["rank_2023"],
+    )

@@ -83,15 +83,15 @@ def _show_log_dialog() -> None:
     if not n:
         st.info("Run an evaluation to start logging.")
         return
-    df = search_log.to_dataframe()
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    rows = search_log.to_rows()
+    st.dataframe(rows, use_container_width=True, hide_index=True)
     cols = st.columns([1, 1, 2])
     with cols[0]:
         st.download_button(
-            label="Download .xlsx",
-            data=search_log.to_xlsx_bytes(),
-            file_name="pca-scout-log.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            label="Download .csv",
+            data=search_log.to_csv_bytes(),
+            file_name="pca-scout-log.csv",
+            mime="text/csv",
             use_container_width=True,
         )
     with cols[1]:
