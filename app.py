@@ -27,6 +27,22 @@ from siting import branding, search_log
 from siting.sources import google_places
 from siting.sources.google_places import PRICE_LEVEL_NUM
 
+
+def _humanize(s: str | None) -> str:
+    """Google Places types come back as `grocery_store`, `hair_salon`, etc.
+    Render them as `Grocery store`, `Hair salon` for display."""
+    if not s:
+        return "—"
+    return s.replace("_", " ").strip().capitalize()
+
+
+def _routes(s: str | None) -> str:
+    """MTA's daytime_routes is space-separated ("2 5", "B D F M"). Show
+    as "2/5", "B/D/F/M" — the way New Yorkers actually say them."""
+    if not s:
+        return ""
+    return "/".join(s.split())
+
 # `evaluate` and its transitive imports (OCM, OSM, NYS Schools, Census, MTA,
 # NYC OpenData, etc.) are deferred until the user clicks Evaluate. Keeping
 # them out of the autocomplete path lowers the resident memory baseline.
@@ -195,30 +211,32 @@ if run_now and selected:
     with col_a:
         nearest = result.nearest_stations[0] if result.nearest_stations else None
         if nearest:
-            wd = (
-                f"{int(nearest.ridership.weekday_2023):,}"
-                if nearest.ridership and nearest.ridership.weekday_2023
-                else "—"
-            )
-            rk = (
-                f" · #{nearest.ridership.rank_2023} citywide"
-                if nearest.ridership and nearest.ridership.rank_2023
-                else ""
-            )
-            branding.stat_band(
-                "Nearest subway",
-                f"{wd}",
-                f"{nearest.stop_name} ({nearest.routes}) · {nearest.distance_ft:,.0f} ft · "
-                f"avg weekday ridership 2023{rk}",
-            )
+            has_ridership = bool(nearest.ridership and nearest.ridership.weekday_2023)
+            if has_ridership:
+                big = f"{int(nearest.ridership.weekday_2023):,}"
+                rk = (
+                    f" · #{nearest.ridership.rank_2023} citywide"
+                    if nearest.ridership.rank_2023 else ""
+                )
+                sub = (
+                    f"{nearest.stop_name} ({_routes(nearest.routes)}) · "
+                    f"{nearest.distance_ft:,.0f} ft · avg weekday ridership 2023{rk}"
+                )
+            else:
+                big = f"{nearest.distance_ft:,.0f} ft"
+                sub = f"{nearest.stop_name} ({_routes(nearest.routes)})"
+            branding.stat_band("Nearest subway", big, sub)
         else:
             st.caption("Nearest subway unavailable.")
         # Show 2nd and 3rd nearest as supporting bullets (not full bands)
         for s in result.nearest_stations[1:3]:
-            wd = f"{int(s.ridership.weekday_2023):,}" if s.ridership and s.ridership.weekday_2023 else "—"
+            wd = (
+                f" · {int(s.ridership.weekday_2023):,}/weekday"
+                if s.ridership and s.ridership.weekday_2023 else ""
+            )
             st.markdown(
                 f"<div style='font-size:0.875rem;color:{branding.TEXT_SECONDARY};margin:0.25rem 0 0 0.25rem;'>"
-                f"• {s.stop_name} ({s.routes}) · {s.distance_ft:,.0f} ft · {wd}/weekday</div>",
+                f"• {s.stop_name} ({_routes(s.routes)}) · {s.distance_ft:,.0f} ft{wd}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -288,17 +306,18 @@ if run_now and selected:
                 with st.expander(f"All coffee ({len(comm.coffee)})"):
                     rows = [
                         {
-                            "name": p.name,
-                            "rating": p.rating,
-                            "reviews": p.rating_count,
-                            "price_level": p.price_level or "—",
-                            "price_range": (
-                                f"${p.price_range['start']}-${p.price_range['end']}"
+                            "Name": p.name,
+                            "Rating": p.rating,
+                            "Reviews": p.rating_count,
+                            "Price": (
+                                f"${p.price_range['start']}–${p.price_range['end']}"
                                 if p.price_range and p.price_range.get("start") and p.price_range.get("end")
-                                else "—"
+                                else {1: "$", 2: "$$", 3: "$$$", 4: "$$$$"}.get(
+                                    PRICE_LEVEL_NUM.get(p.price_level), "—"
+                                )
                             ),
-                            "distance_ft": round(p.distance_ft),
-                            "address": p.address,
+                            "Distance (ft)": round(p.distance_ft),
+                            "Address": p.address,
                         }
                         for p in comm.coffee
                     ]
@@ -315,21 +334,22 @@ if run_now and selected:
                 st.caption("No co-tenants found in radius.")
             else:
                 type_mix = Counter([p.primary_type or "other" for p in comm.cotenants])
-                top_types = ", ".join(f"{t} ({n})" for t, n in type_mix.most_common(5))
+                top_types = ", ".join(f"{_humanize(t)} ({n})" for t, n in type_mix.most_common(5))
+                top1 = _humanize(type_mix.most_common(1)[0][0]) if type_mix else "—"
                 branding.stat_band(
                     f"{len(comm.cotenants)} businesses",
-                    f"{type_mix.most_common(1)[0][0] if type_mix else '—'}",
+                    top1,
                     f"Top types: {top_types}",
                 )
                 with st.expander(f"All co-tenants ({len(comm.cotenants)})"):
                     rows = [
                         {
-                            "name": p.name,
-                            "type": p.primary_type,
-                            "rating": p.rating,
-                            "reviews": p.rating_count,
-                            "distance_ft": round(p.distance_ft),
-                            "address": p.address,
+                            "Name": p.name,
+                            "Type": _humanize(p.primary_type),
+                            "Rating": p.rating,
+                            "Reviews": p.rating_count,
+                            "Distance (ft)": round(p.distance_ft),
+                            "Address": p.address,
                         }
                         for p in comm.cotenants
                     ]
@@ -357,19 +377,19 @@ if run_now and selected:
                     f"<div style='font-size:0.9rem;margin:0.2rem 0;'>"
                     f"• <strong>{a.name}</strong> "
                     f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
-                    f"({a.primary_type or 'attraction'}) · {a.distance_ft:,.0f} ft · {stars} · {reviews}"
+                    f"({_humanize(a.primary_type) or 'Attraction'}) · {a.distance_ft:,.0f} ft · {stars} · {reviews}"
                     f"</span></div>",
                     unsafe_allow_html=True,
                 )
             with st.expander(f"All attractions ({len(comm.attractions)})"):
                 rows = [
                     {
-                        "name": p.name,
-                        "type": p.primary_type,
-                        "rating": p.rating,
-                        "reviews": p.rating_count,
-                        "distance_ft": round(p.distance_ft),
-                        "address": p.address,
+                        "Name": p.name,
+                        "Type": _humanize(p.primary_type),
+                        "Rating": p.rating,
+                        "Reviews": p.rating_count,
+                        "Distance (ft)": round(p.distance_ft),
+                        "Address": p.address,
                     }
                     for p in comm.attractions
                 ]
