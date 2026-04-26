@@ -9,7 +9,7 @@ services:
   - type: web
     name: pca-siting
     runtime: python
-    plan: free
+    plan: starter
     region: oregon
     branch: main
     buildCommand: pip install -r requirements.txt
