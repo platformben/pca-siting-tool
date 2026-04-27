@@ -257,6 +257,25 @@ if run_now and selected:
         else:
             st.caption("Census demographics unavailable.")
 
+        if d and d.median_gross_rent:
+            burden = d.rent_burden_pct
+            if burden is not None:
+                # HUD threshold: >30% rent-burdened, >50% severely rent-burdened.
+                # Surface the threshold so the number is interpretable on its own.
+                if burden >= 50:
+                    burden_note = f"{burden:.0f}% of median income — severely rent burdened (HUD)"
+                elif burden >= 30:
+                    burden_note = f"{burden:.0f}% of median income — rent burdened (HUD >30%)"
+                else:
+                    burden_note = f"{burden:.0f}% of median income — below HUD burden threshold"
+            else:
+                burden_note = "Median gross rent (incl. utilities), ACS 5-year"
+            branding.stat_band(
+                "Median gross rent",
+                f"${d.median_gross_rent:,}/mo",
+                burden_note,
+            )
+
     # ---------- Co-tenants, coffee, attractions ----------
     comm = result.commercial
     if comm and comm.has_places_key:

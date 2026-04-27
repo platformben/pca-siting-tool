@@ -24,6 +24,7 @@ COLUMNS: list[str] = [
     "nearest_worship", "nearest_worship_ft",
     "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
     "tract_mhhi", "tract_population",
+    "tract_median_rent", "tract_rent_burden_pct",
     "coffee_count", "coffee_dollar_low", "coffee_dollar_high",
     "coffee_bean_rating", "coffee_avg_google_rating", "coffee_brands",
     "cotenants_count", "attractions_count", "top_attraction",
@@ -86,6 +87,11 @@ def record(evaluation) -> None:
         ),
         "tract_mhhi": demo.mhhi if demo else None,
         "tract_population": demo.total_population if demo else None,
+        "tract_median_rent": demo.median_gross_rent if demo else None,
+        "tract_rent_burden_pct": (
+            round(demo.rent_burden_pct, 1)
+            if demo and demo.rent_burden_pct is not None else None
+        ),
         "coffee_count": cs.get("count"),
         "coffee_dollar_low": cs.get("dollar_low"),
         "coffee_dollar_high": cs.get("dollar_high"),
