@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import datetime
 
 import requests
 import streamlit as st
@@ -271,9 +272,36 @@ if run_now and selected:
             else:
                 burden_note = "Median gross rent (incl. utilities), ACS 5-year"
             branding.stat_band(
-                "Median gross rent",
+                "Median gross rent (paid)",
                 f"${d.median_gross_rent:,}/mo",
                 burden_note,
+            )
+
+        if result.zori:
+            z = result.zori
+            try:
+                month_label = datetime.strptime(z.month, "%Y-%m-%d").strftime("%b %Y")
+            except ValueError:
+                month_label = z.month
+            # Compare ZORI (current asking) against ACS (recent paid) — the gap
+            # is the gentrification / market-shift signal.
+            if d and d.median_gross_rent and d.median_gross_rent > 0:
+                gap_pct = (z.asking_rent - d.median_gross_rent) / d.median_gross_rent * 100
+                if gap_pct >= 25:
+                    gap_note = f"+{gap_pct:.0f}% vs tract median paid — market shifting fast"
+                elif gap_pct >= 10:
+                    gap_note = f"+{gap_pct:.0f}% vs tract median paid"
+                elif gap_pct >= -10:
+                    gap_note = "In line with tract median paid"
+                else:
+                    gap_note = f"{gap_pct:.0f}% vs tract median paid"
+                detail = f"{month_label} · {gap_note} · ZIP {z.zip_code}"
+            else:
+                detail = f"{month_label} · Zillow ZORI · ZIP {z.zip_code}"
+            branding.stat_band(
+                "ZIP asking rent (current)",
+                f"${z.asking_rent:,.0f}/mo",
+                detail,
             )
 
     # ---------- Co-tenants, coffee, attractions ----------

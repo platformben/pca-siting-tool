@@ -7,10 +7,11 @@ from . import commercial
 from .commercial import CommercialSnapshot
 from .rules import ny
 from .rules.ny import Finding
-from .sources import census_acs, geocode, subway
+from .sources import census_acs, geocode, subway, zillow_rent
 from .sources.geocode import GeocodeResult
 from .sources.subway import NearestStation
 from .sources.census_acs import TractDemographics
+from .sources.zillow_rent import ZoriObservation
 
 
 @dataclass
@@ -20,6 +21,7 @@ class Evaluation:
     findings: list[Finding] = field(default_factory=list)
     nearest_stations: list[NearestStation] = field(default_factory=list)
     demographics: TractDemographics | None = None
+    zori: ZoriObservation | None = None
     commercial: CommercialSnapshot | None = None
 
     @property
@@ -52,6 +54,7 @@ def evaluate(address: str) -> Evaluation:
     ]
     stations = subway.nearest_stations(geo.lat, geo.lon, n=3)
     demo = census_acs.demographics_for_point(geo.lat, geo.lon)
+    zori = zillow_rent.lookup(geo.zip)
     comm = commercial.gather(geo.lat, geo.lon)
 
     return Evaluation(
@@ -60,5 +63,6 @@ def evaluate(address: str) -> Evaluation:
         findings=findings,
         nearest_stations=stations,
         demographics=demo,
+        zori=zori,
         commercial=comm,
     )
