@@ -13,6 +13,8 @@ All canon: see ~/.claude/skills/pca-brand/design-system/.
 """
 from __future__ import annotations
 
+import base64
+from functools import lru_cache
 from pathlib import Path
 
 import streamlit as st
@@ -72,13 +74,25 @@ def _css() -> str:
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
-      margin-bottom: 0.5rem;
+      margin-bottom: 1rem;
+    }}
+    .pca-hero__lockup {{
+      display: flex;
+      align-items: center;
+      gap: 1.1rem;
+    }}
+    .pca-hero__mark {{
+      width: 64px;
+      height: 64px;
+      flex-shrink: 0;
+      object-fit: contain;
+      display: block;
     }}
     .pca-hero__title {{
       font-size: 2.75rem;
       font-weight: 700;
-      line-height: 1.15;
-      letter-spacing: -0.01em;
+      line-height: 1.05;
+      letter-spacing: -0.015em;
       color: {NEAR_BLACK};
       margin: 0;
     }}
@@ -92,7 +106,7 @@ def _css() -> str:
       font-size: 1rem;
       color: {TEXT_SECONDARY};
       max-width: 56ch;
-      margin: 0 0 0.25rem 0;
+      margin: 0.5rem 0 0.25rem 0;
     }}
     .pca-hero__sub em {{
       font-family: 'Noto Serif', Charter, Georgia, serif !important;
@@ -104,6 +118,51 @@ def _css() -> str:
       letter-spacing: 0.12em;
       font-size: 0.6875rem;
       color: {TEXT_SECONDARY};
+    }}
+
+    /* Empty-state "What Scout checks" panel */
+    .pca-checks {{
+      margin: 2.5rem 0 1.5rem 0;
+      padding: 1.75rem 2rem 2rem 2rem;
+      background: {SURFACE_SUBTLE};
+      border-left: 3px solid {INDIGO};
+    }}
+    .pca-checks__label {{
+      font-family: 'Geist Mono', 'SF Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 0.6875rem;
+      color: {TEXT_SECONDARY};
+      margin-bottom: 1.25rem;
+    }}
+    .pca-checks__row {{
+      display: flex;
+      gap: 1rem;
+      padding: 0.85rem 0;
+      border-top: 1px solid {BORDER_SUBTLE};
+    }}
+    .pca-checks__row:first-of-type {{
+      border-top: none;
+      padding-top: 0;
+    }}
+    .pca-checks__num {{
+      font-family: 'Geist Mono', 'SF Mono', monospace;
+      font-size: 0.75rem;
+      color: {INDIGO};
+      letter-spacing: 0.12em;
+      flex-shrink: 0;
+      padding-top: 0.15rem;
+    }}
+    .pca-checks__title {{
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: {NEAR_BLACK};
+      margin-bottom: 0.2rem;
+    }}
+    .pca-checks__detail {{
+      font-size: 0.875rem;
+      color: {TEXT_SECONDARY};
+      line-height: 1.5;
     }}
 
     /* Small-caps indigo section labels with hairline rule beneath */
@@ -290,18 +349,84 @@ def apply() -> None:
 ASSETS = Path(__file__).parent / "assets"
 
 
+@lru_cache(maxsize=4)
+def _mark_data_url(name: str = "pca-mark-purple.png") -> str:
+    """Base64-encode the brand mark for inline embedding.
+
+    Streamlit Cloud occasionally lags serving static assets via st.image(),
+    which leaves the hero looking like the mark "didn't ship." Inlining
+    the bytes as a data: URL eliminates that path — the mark renders the
+    instant the page parses.
+    """
+    p = ASSETS / "brand" / name
+    if not p.exists():
+        return ""
+    return f"data:image/png;base64,{base64.b64encode(p.read_bytes()).decode('ascii')}"
+
+
 def hero(title_html: str, sub_html: str, ref: str | None = None) -> None:
-    """Mark + headline + sub + monospace metadata reference."""
-    mark = ASSETS / "brand" / "pca-mark-purple.png"
-    if mark.exists():
-        st.image(str(mark), width=72)
+    """Inline mark + italic-serif headline lockup, sub, and mono ref line."""
+    src = _mark_data_url()
+    mark_img = (
+        f"<img class='pca-hero__mark' src='{src}' alt='PCA' />" if src else ""
+    )
     meta = f"<div class='pca-hero__meta'>REF. PCA · SCOUT · {ref}</div>" if ref else ""
     st.markdown(
         f"""
         <div class="pca-hero">
-          <h1 class="pca-hero__title">{title_html}</h1>
+          <div class="pca-hero__lockup">
+            {mark_img}
+            <h1 class="pca-hero__title">{title_html}</h1>
+          </div>
           <p class="pca-hero__sub">{sub_html}</p>
           {meta}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def checks_panel() -> None:
+    """Empty-state panel — what Scout will check, shown before any search runs.
+
+    Fills the dead space between the form and the footer when the page first
+    loads, and previews what the user will get back from an evaluation.
+    """
+    items = [
+        (
+            "01",
+            "Compliance gates",
+            "1,000 / 2,000 ft from another dispensary, 500 ft + same-street "
+            "from pre-K – HS schools, 200 ft from houses of worship.",
+        ),
+        (
+            "02",
+            "Commercial snapshot",
+            "Nearest subway with 2023 weekday ridership and citywide rank, "
+            "census-tract median household income, total population.",
+        ),
+        (
+            "03",
+            "Operator economy",
+            "Co-tenants within 500 ft, coffee index within 1,000 ft "
+            "(price band, quality, brands), major attractions within ¼ mile.",
+        ),
+    ]
+    rows = "".join(
+        f"""<div class="pca-checks__row">
+              <span class="pca-checks__num">{n}</span>
+              <div>
+                <div class="pca-checks__title">{title}</div>
+                <div class="pca-checks__detail">{detail}</div>
+              </div>
+            </div>"""
+        for n, title, detail in items
+    )
+    st.markdown(
+        f"""
+        <div class="pca-checks">
+          <div class="pca-checks__label">What Scout checks</div>
+          {rows}
         </div>
         """,
         unsafe_allow_html=True,

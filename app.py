@@ -144,11 +144,16 @@ selected = st_searchbox(
     rerun_on_update=True,
 )
 
-col_submit, col_info = st.columns([1, 3])
-with col_submit:
-    run_now = st.button("Evaluate", type="primary", disabled=not selected, use_container_width=True)
-with col_info:
-    st.caption(f"Address suggestions: {_autocomplete_source}")
+# Single-column form area — Evaluate button on the left, autocomplete-source
+# caption flows beneath as muted helper text. (The previous 1:3 column split
+# rendered the caption inside an input-shaped wrapper that read as a broken
+# second field.)
+btn_col, _btn_pad = st.columns([1, 4])
+with btn_col:
+    run_now = st.button(
+        "Evaluate", type="primary", disabled=not selected, use_container_width=True
+    )
+st.caption(f"Address suggestions: {_autocomplete_source}")
 
 
 # ---------- Result rendering ----------
@@ -404,14 +409,18 @@ if run_now and selected:
             "- Alerting on new listings (Phase 2)\n"
             "- Multi-state rulesets (Phase 3)"
         )
+else:
+    # Empty state — preview what an evaluation will return so the page has
+    # substance before the user runs anything.
+    branding.checks_panel()
 
 
 # ---------- Footer: discrete log access + brand sign-off ----------
 
 _n = search_log.count()
 _log_label = f"Search log ({_n})" if _n else "Search log"
-_l, _r = st.columns([3, 1])
-with _r:
+_log_l, _log_pad = st.columns([1, 4])
+with _log_l:
     if st.button(_log_label, use_container_width=True, type="secondary"):
         _show_log_dialog()
 
