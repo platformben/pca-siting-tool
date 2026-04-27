@@ -258,6 +258,21 @@ if run_now and selected:
         else:
             st.caption("Census demographics unavailable.")
 
+        if d and d.adult_21_plus is not None:
+            # Cannabis is age-21-restricted; this is the actual addressable
+            # market in the tract, not the demographic-blind population count.
+            pct = d.pct_21_plus
+            pct_part = f"{pct:.0f}% of tract" if pct is not None else "tract share unavailable"
+            cohort_part = (
+                f" · 21–34 cohort: {d.adult_21_to_34:,}"
+                if d.adult_21_to_34 is not None else ""
+            )
+            branding.stat_band(
+                "Adult population (21+)",
+                f"{d.adult_21_plus:,}",
+                f"{pct_part}{cohort_part}",
+            )
+
         if d and d.median_gross_rent:
             burden = d.rent_burden_pct
             if burden is not None:

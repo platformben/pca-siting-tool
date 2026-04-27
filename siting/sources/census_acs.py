@@ -1,4 +1,4 @@
-"""Census ACS — median household income, median gross rent, population by tract.
+"""Census ACS — MHHI, median rent, population, and 21+ adult cohort by tract.
 
 Uses the free ACS 5-year API. Requires an API key for volume but tolerates
 missing key for small ad-hoc requests.
@@ -16,6 +16,38 @@ FCC_BLOCK = "https://geo.fcc.gov/api/census/block/find"
 # Any pulled value matching this should be treated as None.
 ACS_NULL = "-666666666"
 
+# B01001 (Sex by Age) splits population into sex × age brackets. To compute
+# "21 and over" — the cannabis-legal cohort and the operator's true addressable
+# market — we sum the under-21 brackets across both sexes and subtract from
+# total population. Census doesn't expose a single "21+" cell directly.
+UNDER_21_VARS = (
+    "B01001_003E",  # Male,   Under 5
+    "B01001_004E",  # Male,   5 to 9
+    "B01001_005E",  # Male,   10 to 14
+    "B01001_006E",  # Male,   15 to 17
+    "B01001_007E",  # Male,   18 and 19
+    "B01001_008E",  # Male,   20
+    "B01001_027E",  # Female, Under 5
+    "B01001_028E",  # Female, 5 to 9
+    "B01001_029E",  # Female, 10 to 14
+    "B01001_030E",  # Female, 15 to 17
+    "B01001_031E",  # Female, 18 and 19
+    "B01001_032E",  # Female, 20
+)
+
+# 21–34 early-adopter cohort — highest-purchase-frequency segment for cannabis
+# retail. Summed directly from sex × age cells.
+ADULT_21_TO_34_VARS = (
+    "B01001_009E",  # Male,   21
+    "B01001_010E",  # Male,   22 to 24
+    "B01001_011E",  # Male,   25 to 29
+    "B01001_012E",  # Male,   30 to 34
+    "B01001_033E",  # Female, 21
+    "B01001_034E",  # Female, 22 to 24
+    "B01001_035E",  # Female, 25 to 29
+    "B01001_036E",  # Female, 30 to 34
+)
+
 
 @dataclass
 class TractDemographics:
@@ -23,6 +55,8 @@ class TractDemographics:
     mhhi: int | None
     total_population: int | None
     median_gross_rent: int | None  # B25064 — median gross monthly rent (incl. utilities)
+    adult_21_plus: int | None      # Cannabis-legal adult population (derived)
+    adult_21_to_34: int | None     # 21–34 early-adopter cohort (derived)
     land_area_sqmi: float | None
 
     @property
@@ -44,15 +78,34 @@ class TractDemographics:
             return None
         return (self.median_gross_rent * 12) / self.mhhi * 100
 
+    @property
+    def pct_21_plus(self) -> float | None:
+        """Adults 21+ as share of total tract population."""
+        if not self.total_population or self.adult_21_plus is None:
+            return None
+        return (self.adult_21_plus / self.total_population) * 100
+
+    @property
+    def pct_21_to_34(self) -> float | None:
+        """21–34 cohort as share of total tract population."""
+        if not self.total_population or self.adult_21_to_34 is None:
+            return None
+        return (self.adult_21_to_34 / self.total_population) * 100
+
 
 def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
     tract = _tract_for_point(lat, lon)
     if not tract:
         return None
     state, county, trct = tract[:2], tract[2:5], tract[5:]
+    # B19013_001E = MHHI, B01003_001E = total pop, B25064_001E = median gross rent.
+    # Add the under-21 and 21-34 sex × age cells so we can derive 21+ market.
+    all_vars = (
+        "B19013_001E", "B01003_001E", "B25064_001E",
+        *UNDER_21_VARS, *ADULT_21_TO_34_VARS,
+    )
     params = {
-        # B19013_001E = MHHI, B01003_001E = total pop, B25064_001E = median gross rent
-        "get": "B19013_001E,B01003_001E,B25064_001E",
+        "get": ",".join(all_vars),
         "for": f"tract:{trct}",
         "in": f"state:{state} county:{county}",
     }
@@ -82,11 +135,34 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
         except (TypeError, ValueError):
             return None
 
+    total_pop = _int("B01003_001E")
+
+    # 21+ derivation: total - sum(under-21 cells across both sexes). Falls
+    # back to None when the under-21 cells are entirely suppressed (rare;
+    # tracts with very small populations sometimes have ACS suppression
+    # cascade through the age detail).
+    under_21_vals = [_int(v) for v in UNDER_21_VARS]
+    if total_pop is not None and any(v is not None for v in under_21_vals):
+        under_21 = sum(v for v in under_21_vals if v is not None)
+        adult_21_plus = max(total_pop - under_21, 0)
+    else:
+        adult_21_plus = None
+
+    # 21-34 cohort: direct sum of the eight sex × age cells, with the same
+    # all-suppressed -> None convention.
+    cohort_vals = [_int(v) for v in ADULT_21_TO_34_VARS]
+    if any(v is not None for v in cohort_vals):
+        adult_21_to_34 = sum(v for v in cohort_vals if v is not None)
+    else:
+        adult_21_to_34 = None
+
     return TractDemographics(
         tract_fips=tract,
         mhhi=_int("B19013_001E"),
-        total_population=_int("B01003_001E"),
+        total_population=total_pop,
         median_gross_rent=_int("B25064_001E"),
+        adult_21_plus=adult_21_plus,
+        adult_21_to_34=adult_21_to_34,
         land_area_sqmi=None,  # TIGER land area requires a separate lookup; left off v1
     )
 

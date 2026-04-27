@@ -24,6 +24,7 @@ COLUMNS: list[str] = [
     "nearest_worship", "nearest_worship_ft",
     "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
     "tract_mhhi", "tract_population",
+    "tract_adult_21_plus", "tract_pct_21_plus", "tract_adult_21_to_34",
     "tract_median_rent", "tract_rent_burden_pct",
     "zip_zori_asking_rent", "zip_zori_month",
     "zip_offpremises_count",
@@ -92,6 +93,12 @@ def record(evaluation) -> None:
         ),
         "tract_mhhi": demo.mhhi if demo else None,
         "tract_population": demo.total_population if demo else None,
+        "tract_adult_21_plus": demo.adult_21_plus if demo else None,
+        "tract_pct_21_plus": (
+            round(demo.pct_21_plus, 1)
+            if demo and demo.pct_21_plus is not None else None
+        ),
+        "tract_adult_21_to_34": demo.adult_21_to_34 if demo else None,
         "tract_median_rent": demo.median_gross_rent if demo else None,
         "tract_rent_burden_pct": (
             round(demo.rent_burden_pct, 1)
