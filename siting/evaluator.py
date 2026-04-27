@@ -5,13 +5,21 @@ from dataclasses import dataclass, field
 
 from . import commercial
 from .commercial import CommercialSnapshot
+from .geo import haversine_feet
 from .rules import ny
 from .rules.ny import Finding
-from .sources import census_acs, geocode, subway, zillow_rent
+from .sources import census_acs, geocode, ocm, subway, zillow_rent
 from .sources.geocode import GeocodeResult
+from .sources.ocm import Dispensary
 from .sources.subway import NearestStation
 from .sources.census_acs import TractDemographics
 from .sources.zillow_rent import ZoriObservation
+
+# Competitive radius for the "nearest dispensaries" anchor view. The compliance
+# gate uses a tighter ~2,500 ft window to test § 72 distance rules; this widens
+# to 1.5 mi so the operator gets a real competitive picture even in NYC's
+# denser cannabis corridors where multiple competitors clear the legal gate.
+COMPETITOR_RADIUS_FT = 7920.0
 
 
 @dataclass
@@ -22,6 +30,7 @@ class Evaluation:
     nearest_stations: list[NearestStation] = field(default_factory=list)
     demographics: TractDemographics | None = None
     zori: ZoriObservation | None = None
+    nearest_dispensaries: list[Dispensary] = field(default_factory=list)
     commercial: CommercialSnapshot | None = None
 
     @property
@@ -56,6 +65,7 @@ def evaluate(address: str) -> Evaluation:
     demo = census_acs.demographics_for_point(geo.lat, geo.lon)
     zori = zillow_rent.lookup(geo.zip)
     comm = commercial.gather(geo.lat, geo.lon)
+    nearest_dispensaries = _nearest_competitors(geo.lat, geo.lon)
 
     return Evaluation(
         input_address=address,
@@ -64,5 +74,24 @@ def evaluate(address: str) -> Evaluation:
         nearest_stations=stations,
         demographics=demo,
         zori=zori,
+        nearest_dispensaries=nearest_dispensaries,
         commercial=comm,
     )
+
+
+def _nearest_competitors(lat: float, lon: float) -> list[Dispensary]:
+    """Top 3 active dispensaries within the competitive radius, by walking distance.
+
+    Filters to the active-license endpoint only — pending licenses are future
+    competitors but not present-day ones. OCM's record schema includes a free-text
+    `operational_status` we surface in the UI but don't filter on, since that
+    field is inconsistently populated.
+    """
+    competitors = [
+        d for d in ocm.nearby_dispensaries(lat, lon, radius_ft=COMPETITOR_RADIUS_FT)
+        if d.status == "active"
+    ]
+    for d in competitors:
+        d.distance_ft = haversine_feet(lat, lon, d.lat, d.lon)
+    competitors.sort(key=lambda d: d.distance_ft)
+    return competitors[:3]

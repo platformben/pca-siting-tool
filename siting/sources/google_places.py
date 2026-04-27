@@ -158,6 +158,30 @@ def nearby_worship(lat: float, lon: float, radius_ft: float = 600.0) -> list[Pla
     return _call(lat, lon, types, radius_m, max_results=15, field_mask=_PRO_MIX)
 
 
+def nearby_supermarkets(lat: float, lon: float, radius_ft: float = 2640.0) -> list[Place]:
+    """Closest full-service supermarkets within walking distance (default ½ mi).
+
+    Uses both `supermarket` and `grocery_store` types — Google's typing is
+    inconsistent (Trader Joe's variously appears under either), and we'd
+    rather take the union than miss an obvious anchor on a technicality.
+    """
+    radius_m = radius_ft / 3.28084
+    return _call(lat, lon, ["supermarket", "grocery_store"], radius_m,
+                 max_results=10, field_mask=_PRO_MIX)
+
+
+def nearby_pharmacies(lat: float, lon: float, radius_ft: float = 2640.0) -> list[Place]:
+    """Closest pharmacies / drugstores within walking distance (default ½ mi).
+
+    Chains (CVS, Walgreens, Duane Reade) anchor a corridor and are an honest
+    "is the chain capital still here?" signal. Pulled with both `pharmacy`
+    and `drugstore` types since Google classifies the same chain inconsistently.
+    """
+    radius_m = radius_ft / 3.28084
+    return _call(lat, lon, ["pharmacy", "drugstore"], radius_m,
+                 max_results=10, field_mask=_PRO_MIX)
+
+
 def nearby_attractions(lat: float, lon: float, radius_ft: float = 1320.0) -> list[Place]:
     """Major foot-traffic generators within walking distance (1/4 mile default).
 

@@ -26,6 +26,9 @@ COLUMNS: list[str] = [
     "tract_mhhi", "tract_population",
     "tract_median_rent", "tract_rent_burden_pct",
     "zip_zori_asking_rent", "zip_zori_month",
+    "nearest_competitor", "nearest_competitor_mi", "nearest_competitor_license_type",
+    "nearest_supermarket", "nearest_supermarket_ft",
+    "nearest_pharmacy", "nearest_pharmacy_ft",
     "coffee_count", "coffee_dollar_low", "coffee_dollar_high",
     "coffee_bean_rating", "coffee_avg_google_rating", "coffee_brands",
     "cotenants_count", "attractions_count", "top_attraction",
@@ -97,6 +100,33 @@ def record(evaluation) -> None:
             round(evaluation.zori.asking_rent) if evaluation.zori else None
         ),
         "zip_zori_month": evaluation.zori.month if evaluation.zori else None,
+        "nearest_competitor": (
+            (evaluation.nearest_dispensaries[0].dba
+             or evaluation.nearest_dispensaries[0].entity_name)
+            if evaluation.nearest_dispensaries else None
+        ),
+        "nearest_competitor_mi": (
+            round(evaluation.nearest_dispensaries[0].distance_ft / 5280, 2)
+            if evaluation.nearest_dispensaries else None
+        ),
+        "nearest_competitor_license_type": (
+            evaluation.nearest_dispensaries[0].license_type
+            if evaluation.nearest_dispensaries else None
+        ),
+        "nearest_supermarket": (
+            comm.nearest_supermarket.name if comm and comm.nearest_supermarket else None
+        ),
+        "nearest_supermarket_ft": (
+            round(comm.nearest_supermarket.distance_ft)
+            if comm and comm.nearest_supermarket else None
+        ),
+        "nearest_pharmacy": (
+            comm.nearest_pharmacy.name if comm and comm.nearest_pharmacy else None
+        ),
+        "nearest_pharmacy_ft": (
+            round(comm.nearest_pharmacy.distance_ft)
+            if comm and comm.nearest_pharmacy else None
+        ),
         "coffee_count": cs.get("count"),
         "coffee_dollar_low": cs.get("dollar_low"),
         "coffee_dollar_high": cs.get("dollar_high"),

@@ -304,8 +304,99 @@ if run_now and selected:
                 detail,
             )
 
-    # ---------- Co-tenants, coffee, attractions ----------
+    # ---------- Neighborhood anchors ----------
+    # Closest cannabis competitor (active, within 1.5 mi) plus nearest
+    # daily-needs anchors (supermarket, pharmacy). Section renders when any
+    # of the three has data — competitors come from OCM (no key required),
+    # supermarket/pharmacy come from Places (require GOOGLE_MAPS_API_KEY).
     comm = result.commercial
+    has_anchors = bool(
+        result.nearest_dispensaries
+        or (comm and (comm.nearest_supermarket or comm.nearest_pharmacy))
+    )
+    in_ny = (result.geo.state or "").upper() in {"NY", "NEW YORK"}
+    if has_anchors or in_ny:
+        branding.section("Neighborhood anchors")
+
+        # Cannabis competitor — show the section even when none are nearby,
+        # because "no competitor in 1.5 mi" is itself a meaningful signal.
+        if in_ny:
+            st.markdown(
+                f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin-bottom:0.5rem;'>NEAREST ACTIVE DISPENSARIES · 1.5 MI</div>",
+                unsafe_allow_html=True,
+            )
+            if not result.nearest_dispensaries:
+                st.caption("No active dispensary licenses within 1.5 mi.")
+            else:
+                for d in result.nearest_dispensaries:
+                    mi = d.distance_ft / 5280
+                    label = d.dba or d.entity_name or "(unnamed license)"
+                    lic = d.license_type or "Retail"
+                    op = (d.operational_status or "").strip()
+                    op_chip = f" · {op}" if op else ""
+                    addr_parts = [p for p in (d.address, d.city) if p]
+                    addr = ", ".join(addr_parts)
+                    st.markdown(
+                        f"<div style='font-size:0.95rem;margin:0.4rem 0;'>"
+                        f"<strong>{label}</strong> "
+                        f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.875rem;'>"
+                        f"· {mi:.2f} mi · {lic}{op_chip}</span>"
+                        f"<br/>"
+                        f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                        f"{addr}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+        if comm and (comm.nearest_supermarket or comm.nearest_pharmacy):
+            col_sm, col_rx = st.columns(2)
+            with col_sm:
+                st.markdown(
+                    f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                    f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                    f"margin:1.25rem 0 0.5rem 0;'>NEAREST SUPERMARKET · ½ MI</div>",
+                    unsafe_allow_html=True,
+                )
+                sm = comm.nearest_supermarket
+                if not sm:
+                    st.caption("None within ½ mi.")
+                else:
+                    rating = (
+                        f"★ {sm.rating} ({sm.rating_count:,} reviews)"
+                        if sm.rating and sm.rating_count else "—"
+                    )
+                    st.markdown(
+                        f"<div style='font-size:0.95rem;'>"
+                        f"<strong>{sm.name}</strong>"
+                        f"<br/><span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                        f"{sm.distance_ft:,.0f} ft · {rating}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+            with col_rx:
+                st.markdown(
+                    f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                    f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                    f"margin:1.25rem 0 0.5rem 0;'>NEAREST PHARMACY · ½ MI</div>",
+                    unsafe_allow_html=True,
+                )
+                rx = comm.nearest_pharmacy
+                if not rx:
+                    st.caption("None within ½ mi.")
+                else:
+                    rating = (
+                        f"★ {rx.rating} ({rx.rating_count:,} reviews)"
+                        if rx.rating and rx.rating_count else "—"
+                    )
+                    st.markdown(
+                        f"<div style='font-size:0.95rem;'>"
+                        f"<strong>{rx.name}</strong>"
+                        f"<br/><span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                        f"{rx.distance_ft:,.0f} ft · {rating}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+    # ---------- Co-tenants, coffee, attractions ----------
     if comm and comm.has_places_key:
         branding.section("Operator economy")
 
