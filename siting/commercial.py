@@ -6,10 +6,23 @@ gracefully (returns empty dict) when no API key is configured.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .geo import haversine_feet
 from .sources import google_places
 from .sources.google_places import Place
+
+
+def _place_is_closed(p: Any) -> bool:
+    """Defensive Place-status check.
+
+    Hoisted to module scope (out of gather()) on purpose: cross-module schema
+    drift between Place and commercial.py has hit us once already on a
+    Streamlit Cloud deploy that served stale bytecode. Module-level definition
+    + getattr() with a None default makes this resilient to a Place class
+    that's missing the business_status attribute entirely.
+    """
+    return getattr(p, "business_status", None) == "CLOSED_PERMANENTLY"
 
 
 @dataclass
@@ -35,19 +48,11 @@ def gather(lat: float, lon: float) -> CommercialSnapshot:
     cotenants_raw = google_places.nearby_cotenants(lat, lon, radius_ft=500)
     for p in cotenants_raw:
         p.distance_ft = haversine_feet(lat, lon, p.lat, p.lon)
-    # Vacancy proxy is computed off the unfiltered pull — we want the
-    # CLOSED_PERMANENTLY count even though we don't display those spots in
-    # the active-cotenants list. Operational status drops them from the
-    # rendered list to avoid double-counting "co-tenants" with shuttered ones.
-    #
-    # getattr() is defensive: if a stale-bytecode deploy ever serves a Place
-    # class missing this field, we degrade to "no vacancy data" instead of
-    # 500-erroring the whole evaluation.
-    def _is_closed(p) -> bool:
-        return getattr(p, "business_status", None) == "CLOSED_PERMANENTLY"
-
-    vacancy_count = sum(1 for p in cotenants_raw if _is_closed(p))
-    cotenants = [p for p in cotenants_raw if not _is_closed(p)]
+    # Vacancy proxy: count places marked CLOSED_PERMANENTLY by Google.
+    # Filter the same shutters out of the rendered cotenants list so the
+    # type-mix and total don't double-count shuttered locations as live.
+    vacancy_count = sum(1 for p in cotenants_raw if _place_is_closed(p))
+    cotenants = [p for p in cotenants_raw if not _place_is_closed(p)]
     cotenants.sort(key=lambda p: p.distance_ft)
 
     coffee = google_places.nearby_coffee(lat, lon, radius_ft=1000)
