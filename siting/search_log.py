@@ -22,6 +22,10 @@ COLUMNS: list[str] = [
     "nearest_dispensary", "nearest_dispensary_ft",
     "nearest_school", "nearest_school_ft", "nearest_school_same_street",
     "nearest_worship", "nearest_worship_ft",
+    "lot_zoning", "lot_overlay", "lot_bldgclass", "lot_owner",
+    "lot_area_sqft", "lot_frontage_ft", "lot_depth_ft",
+    "bldg_area_sqft", "year_built", "year_altered", "num_floors",
+    "built_far", "max_commercial_far", "assessed_total",
     "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
     "tract_mhhi", "tract_population",
     "tract_adult_21_plus", "tract_pct_21_plus", "tract_adult_21_to_34",
@@ -62,6 +66,7 @@ def record(evaluation) -> None:
     nearest_station = evaluation.nearest_stations[0] if evaluation.nearest_stations else None
     demo = evaluation.demographics
     comm = evaluation.commercial
+    lot = evaluation.pluto
 
     cs = (comm.coffee_summary if comm else {}) or {}
 
@@ -84,6 +89,20 @@ def record(evaluation) -> None:
         "nearest_school_same_street": nearest_school_ev.get("same_street"),
         "nearest_worship": nearest_worship_ev.get("name"),
         "nearest_worship_ft": nearest_worship_ev.get("distance_ft"),
+        "lot_zoning": lot.zonedist1 if lot else None,
+        "lot_overlay": (lot.overlay1 if lot else None) or None,
+        "lot_bldgclass": lot.bldgclass if lot else None,
+        "lot_owner": lot.owner if lot else None,
+        "lot_area_sqft": lot.lot_area if lot else None,
+        "lot_frontage_ft": lot.lot_frontage_ft if lot else None,
+        "lot_depth_ft": lot.lot_depth_ft if lot else None,
+        "bldg_area_sqft": lot.bldg_area if lot else None,
+        "year_built": lot.year_built if lot else None,
+        "year_altered": lot.year_altered if lot else None,
+        "num_floors": lot.num_floors if lot else None,
+        "built_far": lot.built_far if lot else None,
+        "max_commercial_far": lot.max_commercial_far if lot else None,
+        "assessed_total": lot.assessed_total if lot else None,
         "nearest_subway": nearest_station.stop_name if nearest_station else None,
         "nearest_subway_ft": int(nearest_station.distance_ft) if nearest_station else None,
         "subway_weekday_2023": (

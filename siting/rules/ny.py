@@ -361,18 +361,22 @@ def check_cofo(bbl: str | None) -> Finding:
     )
 
 
-def check_zoning(bbl: str | None) -> Finding:
-    """PLUTO-based screen for retail suitability. Fast pre-check before C of O."""
+def check_zoning(lot: nyc_opendata.PlutoLot | None, bbl: str | None = None) -> Finding:
+    """PLUTO-based screen for retail suitability. Fast pre-check before C of O.
+
+    Takes a pre-fetched PlutoLot rather than fetching by BBL itself, so the
+    evaluator can pull PLUTO once and use it both for this check and for
+    the rendered "The lot" section without making the same Socrata call twice.
+    """
     rule = "Zoning & land use (PLUTO)"
     details = [
         "PLUTO is NYC's tax-lot database; lists zoning district, land-use code, and building class.",
         "Cannabis retail needs a commercial zone (C1/C2/C4/C5/C6/C8) or a commercial overlay on a residential lot.",
         "This is a first-pass screen — commercial zoning + retail C of O are both required.",
     ]
-    if not bbl:
-        return Finding(rule, "warn", "No BBL — PLUTO lookup needs NYC address.", details)
-    lot = nyc_opendata.pluto_for_bbl(bbl)
     if not lot:
+        if not bbl:
+            return Finding(rule, "warn", "No BBL — PLUTO lookup needs NYC address.", details)
         return Finding(rule, "warn", f"No PLUTO record for BBL {bbl}.", details)
     status, evidence = nyc_opendata.zoning_supports_retail(lot)
     ev = [{

@@ -54,9 +54,28 @@ class PlutoLot:
     overlay1: str | None    # commercial overlay (e.g. "C1-5") in residential districts
     owner: str
     year_built: int | None
+    year_altered: int | None    # yearalter1 — last major alteration on file
     num_floors: float | None
+    num_buildings: int | None
     bldg_area: int | None
     lot_area: int | None
+    lot_frontage_ft: int | None  # storefront width — material for retail siting
+    lot_depth_ft: int | None
+    built_far: float | None       # current built floor-area ratio
+    max_commercial_far: float | None  # commfar — max commercial FAR allowed
+    assessed_total: int | None    # DOF assessed total value (land + improvements)
+
+    @property
+    def far_utilization_pct(self) -> float | None:
+        """Built FAR as % of max commercial FAR — proxy for development headroom.
+
+        100% = lot is built out to its zoning ceiling (no easy expansion).
+        50% = significant unused development rights — lever for negotiation
+        or future build-out plans.
+        """
+        if not self.built_far or not self.max_commercial_far:
+            return None
+        return (self.built_far / self.max_commercial_far) * 100
 
 
 def _headers() -> dict:
@@ -194,9 +213,16 @@ def pluto_for_bbl(bbl: str) -> PlutoLot | None:
         overlay1=row.get("overlay1"),
         owner=row.get("ownername", ""),
         year_built=_to_int(row.get("yearbuilt")),
+        year_altered=_to_int(row.get("yearalter1")),
         num_floors=_to_float(row.get("numfloors")),
+        num_buildings=_to_int(row.get("numbldgs")),
         bldg_area=_to_int(row.get("bldgarea")),
         lot_area=_to_int(row.get("lotarea")),
+        lot_frontage_ft=_to_int(row.get("lotfront")),
+        lot_depth_ft=_to_int(row.get("lotdepth")),
+        built_far=_to_float(row.get("builtfar")),
+        max_commercial_far=_to_float(row.get("commfar")),
+        assessed_total=_to_int(row.get("assesstot")),
     )
 
 

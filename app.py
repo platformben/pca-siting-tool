@@ -210,6 +210,123 @@ if run_now and selected:
                 with st.expander(f"Evidence ({len(f.evidence)})"):
                     st.dataframe(f.evidence, use_container_width=True, hide_index=True)
 
+    # ---------- The lot ----------
+    # NYC-only parcel detail. Renders right after Compliance so the operator
+    # gets the physical-site read before market context. Section is hidden
+    # entirely outside NYC since PLUTO is a city-of-NY dataset.
+    if result.pluto:
+        lot = result.pluto
+        branding.section("The lot")
+
+        # Header line: address + BBL + owner. PLUTO's address column is often
+        # cleaner than the geocoder's (matched to the actual tax lot, not the
+        # nearest building entrance Google found).
+        owner_part = (
+            f" · Owner: <strong style='color:{branding.NEAR_BLACK};'>{lot.owner}</strong>"
+            if lot.owner else ""
+        )
+        st.markdown(
+            f"<div style='font-size:0.95rem;color:{branding.NEAR_BLACK};margin-bottom:1rem;'>"
+            f"<strong>{lot.address or '—'}</strong>"
+            f" <span style='font-family:Geist Mono,monospace;color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+            f"BBL {lot.bbl}</span>"
+            f"<br/><span style='color:{branding.TEXT_SECONDARY};font-size:0.875rem;'>"
+            f"Land use: {lot.landuse_code} — {lot.landuse_label} · "
+            f"Building class: {lot.bldgclass or '—'}{owner_part}</span></div>",
+            unsafe_allow_html=True,
+        )
+
+        col_lot, col_bldg = st.columns(2)
+        with col_lot:
+            # Lot dimensions — frontage is the storefront width, the most
+            # operator-relevant single number on this whole section.
+            if lot.lot_area or lot.lot_frontage_ft:
+                area_str = f"{lot.lot_area:,} sqft" if lot.lot_area else "—"
+                if lot.lot_frontage_ft and lot.lot_depth_ft:
+                    detail = (
+                        f"{lot.lot_frontage_ft} ft frontage × "
+                        f"{lot.lot_depth_ft} ft depth"
+                    )
+                elif lot.lot_frontage_ft:
+                    detail = f"{lot.lot_frontage_ft} ft frontage"
+                else:
+                    detail = "Dimensions partial"
+                branding.stat_band("Lot", area_str, detail)
+            else:
+                st.caption("Lot dimensions unavailable.")
+
+            # Zoning + overlay
+            zone_part = lot.zonedist1 or "—"
+            overlay_part = (
+                f" + commercial overlay {lot.overlay1}"
+                if lot.overlay1 and lot.overlay1.upper().startswith(("C1", "C2"))
+                else (f" + overlay {lot.overlay1}" if lot.overlay1 else "")
+            )
+            zone_kind = (
+                "commercial"
+                if zone_part.upper().startswith(("C", "M"))
+                else "residential" if zone_part.upper().startswith("R") else "—"
+            )
+            branding.stat_band(
+                "Zoning",
+                zone_part + overlay_part,
+                f"Primary district kind: {zone_kind}",
+            )
+
+        with col_bldg:
+            # Building summary — total area + floors + age + alteration.
+            if lot.bldg_area or lot.year_built:
+                area_str = f"{lot.bldg_area:,} sqft" if lot.bldg_area else "—"
+                age_parts = []
+                if lot.num_floors:
+                    age_parts.append(
+                        f"{int(lot.num_floors)} floor{'s' if int(lot.num_floors) != 1 else ''}"
+                    )
+                if lot.year_built:
+                    yr = f"built {lot.year_built}"
+                    if lot.year_altered and lot.year_altered > lot.year_built:
+                        yr += f", last altered {lot.year_altered}"
+                    age_parts.append(yr)
+                if lot.num_buildings and lot.num_buildings > 1:
+                    age_parts.append(f"{lot.num_buildings} buildings")
+                detail = " · ".join(age_parts) if age_parts else "Year/floor data partial"
+                branding.stat_band("Building", area_str, detail)
+            else:
+                st.caption("Building dimensions unavailable.")
+
+            # FAR utilization + assessed value
+            far_pct = lot.far_utilization_pct
+            if far_pct is not None:
+                if far_pct >= 95:
+                    far_note = f"{far_pct:.0f}% of max — built out, no expansion headroom"
+                elif far_pct >= 70:
+                    far_note = f"{far_pct:.0f}% of max — modest expansion headroom"
+                else:
+                    far_note = f"{far_pct:.0f}% of max — significant unused FAR"
+                branding.stat_band(
+                    "Built FAR",
+                    f"{lot.built_far:.2f} of {lot.max_commercial_far:.2f}",
+                    far_note,
+                )
+            elif lot.assessed_total:
+                branding.stat_band(
+                    "Assessed total (DOF)",
+                    f"${lot.assessed_total:,}",
+                    "Land + improvements; assessed value, not market value",
+                )
+
+        # Assessed value as a small caption line if not already shown above
+        if far_pct is not None and lot.assessed_total:
+            st.markdown(
+                f"<div style='font-size:0.875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin-top:0.5rem;'>"
+                f"DOF assessed total: <strong style='color:{branding.NEAR_BLACK};'>"
+                f"${lot.assessed_total:,}</strong> "
+                f"<span style='font-size:0.8125rem;'>"
+                f"(land + improvements; not market value)</span></div>",
+                unsafe_allow_html=True,
+            )
+
     # ---------- Commercial snapshot ----------
     branding.section("Commercial snapshot")
 

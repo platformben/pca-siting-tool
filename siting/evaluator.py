@@ -8,8 +8,9 @@ from .commercial import CommercialSnapshot
 from .geo import haversine_feet
 from .rules import ny
 from .rules.ny import Finding
-from .sources import census_acs, geocode, nys_liquor, ocm, subway, zillow_rent
+from .sources import census_acs, geocode, nyc_opendata, nys_liquor, ocm, subway, zillow_rent
 from .sources.geocode import GeocodeResult
+from .sources.nyc_opendata import PlutoLot
 from .sources.ocm import Dispensary
 from .sources.subway import NearestStation
 from .sources.census_acs import TractDemographics
@@ -32,6 +33,7 @@ class Evaluation:
     zori: ZoriObservation | None = None
     nearest_dispensaries: list[Dispensary] = field(default_factory=list)
     offpremises_zip_count: int | None = None  # NYS SLA off-premises licenses in this ZIP
+    pluto: PlutoLot | None = None              # NYC parcel record (NY-only)
     commercial: CommercialSnapshot | None = None
 
     @property
@@ -55,11 +57,15 @@ def evaluate(address: str) -> Evaluation:
             )
         ])
 
+    # Pull PLUTO once and pass it through to both the zoning gate and the
+    # rendered "The lot" section. Avoids two Socrata round-trips per eval.
+    pluto = nyc_opendata.pluto_for_bbl(geo.bbl) if geo.bbl else None
+
     findings: list[Finding] = [
         ny.check_dispensary_distance(geo.lat, geo.lon, geo.city),
         ny.check_schools(geo.lat, geo.lon, geo.street),
         ny.check_worship(geo.lat, geo.lon),
-        ny.check_zoning(geo.bbl),
+        ny.check_zoning(pluto, bbl=geo.bbl),
         ny.check_cofo(geo.bbl),
     ]
     stations = subway.nearest_stations(geo.lat, geo.lon, n=3)
@@ -83,6 +89,7 @@ def evaluate(address: str) -> Evaluation:
         zori=zori,
         nearest_dispensaries=nearest_dispensaries,
         offpremises_zip_count=offpremises_zip_count,
+        pluto=pluto,
         commercial=comm,
     )
 
