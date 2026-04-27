@@ -26,6 +26,8 @@ COLUMNS: list[str] = [
     "lot_area_sqft", "lot_frontage_ft", "lot_depth_ft",
     "bldg_area_sqft", "year_built", "year_altered", "num_floors",
     "built_far", "max_commercial_far", "assessed_total",
+    "last_sale_amount", "last_sale_date", "last_sale_doc_type",
+    "deeds_on_file",
     "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
     "tract_mhhi", "tract_population",
     "tract_adult_21_plus", "tract_pct_21_plus", "tract_adult_21_to_34",
@@ -67,6 +69,9 @@ def record(evaluation) -> None:
     demo = evaluation.demographics
     comm = evaluation.commercial
     lot = evaluation.pluto
+    # Find the most recent priced sale among recorded deeds for the CSV log.
+    from .sources.acris import last_priced_sale
+    last_priced = last_priced_sale(evaluation.recent_deeds)
 
     cs = (comm.coffee_summary if comm else {}) or {}
 
@@ -103,6 +108,10 @@ def record(evaluation) -> None:
         "built_far": lot.built_far if lot else None,
         "max_commercial_far": lot.max_commercial_far if lot else None,
         "assessed_total": lot.assessed_total if lot else None,
+        "last_sale_amount": last_priced.sale_amount if last_priced else None,
+        "last_sale_date": last_priced.recorded_date if last_priced else None,
+        "last_sale_doc_type": last_priced.doc_type if last_priced else None,
+        "deeds_on_file": len(evaluation.recent_deeds) or None,
         "nearest_subway": nearest_station.stop_name if nearest_station else None,
         "nearest_subway_ft": int(nearest_station.distance_ft) if nearest_station else None,
         "subway_weekday_2023": (

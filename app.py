@@ -327,6 +327,67 @@ if run_now and selected:
                 unsafe_allow_html=True,
             )
 
+        # ACRIS deed history — last priced sale + count of prior transfers.
+        # Read together with the assessed value above, this gives the operator
+        # the landlord's basis: what they paid, when, and what the city now
+        # values it at.
+        if result.recent_deeds:
+            from siting.sources.acris import last_priced_sale
+            priced = last_priced_sale(result.recent_deeds)
+            st.markdown(
+                f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin:1.25rem 0 0.5rem 0;'>RECORDED DEEDS · NYC ACRIS</div>",
+                unsafe_allow_html=True,
+            )
+            if priced:
+                try:
+                    d = datetime.strptime(priced.recorded_date, "%Y-%m-%d")
+                    date_str = d.strftime("%b %Y")
+                    years_ago = (datetime.now() - d).days / 365.25
+                    age_str = (
+                        f"{years_ago:.0f} years ago"
+                        if years_ago >= 1 else "less than a year ago"
+                    )
+                except (ValueError, TypeError):
+                    date_str = priced.recorded_date or "—"
+                    age_str = ""
+                age_part = f" · {age_str}" if age_str else ""
+                st.markdown(
+                    f"<div style='font-size:0.95rem;color:{branding.NEAR_BLACK};'>"
+                    f"Last priced sale: "
+                    f"<strong>${priced.sale_amount:,}</strong> "
+                    f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.875rem;'>"
+                    f"recorded {date_str}{age_part}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption(
+                    "Deeds on file but no priced sale — likely intra-family "
+                    "transfers, gifts, or $1 conveyances."
+                )
+
+            # Count of all recorded deeds (priced + unpriced) for context.
+            n_deeds = len(result.recent_deeds)
+            if n_deeds > 1 or (n_deeds == 1 and not priced):
+                # Build a compact "prior years" list from non-most-recent records
+                prior_years = []
+                for d in result.recent_deeds[1:4]:
+                    try:
+                        prior_years.append(d.recorded_date[:4])
+                    except (TypeError, AttributeError):
+                        pass
+                prior_part = (
+                    f" — prior in {', '.join(prior_years)}" if prior_years else ""
+                )
+                st.markdown(
+                    f"<div style='font-size:0.8125rem;color:{branding.TEXT_SECONDARY};"
+                    f"margin-top:0.25rem;'>"
+                    f"{n_deeds} recorded deed{'s' if n_deeds != 1 else ''} on file{prior_part}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
     # ---------- Commercial snapshot ----------
     branding.section("Commercial snapshot")
 
