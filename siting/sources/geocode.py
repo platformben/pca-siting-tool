@@ -26,6 +26,18 @@ NYC_COUNTIES = {
     "queens county", "richmond county",
 }
 
+# Map county -> borough name. Used to backfill `borough` when Google's
+# geocoder returns a neighborhood (Astoria, Williamsburg) as locality and
+# omits sublocality_level_1 — without this, _looks_like_nyc() falsely
+# rejected those addresses as out-of-NYC and BBL/PLUTO/ACRIS never loaded.
+_COUNTY_TO_BOROUGH = {
+    "new york county": "Manhattan",
+    "kings county": "Brooklyn",
+    "bronx county": "Bronx",
+    "queens county": "Queens",
+    "richmond county": "Staten Island",
+}
+
 
 @dataclass
 class GeocodeResult:
@@ -67,9 +79,24 @@ def geocode(address: str) -> GeocodeResult | None:
 
 
 def _looks_like_nyc(result: GeocodeResult) -> bool:
+    """Detect NYC addresses across all five boroughs.
+
+    Has to handle three Google-geocoder shapes for outer-borough addresses:
+      - city = "Brooklyn" (clean — usually for "Brooklyn, NY" inputs)
+      - city = "Astoria"  (neighborhood — common for "30-30 Northern Blvd" inputs)
+      - city = "" + sublocality_level_1 = "Queens" (rare but seen)
+
+    The borough field is the most reliable signal once we backfill it from
+    county in _google_geocode(). Checking both city and borough catches all
+    three shapes without false-positives on out-of-NYC addresses.
+    """
     if not result:
         return False
-    return (result.city or "").strip().lower() in NYC_BOROUGHS
+    if (result.city or "").strip().lower() in NYC_BOROUGHS:
+        return True
+    if (result.borough or "").strip().lower() in NYC_BOROUGHS:
+        return True
+    return False
 
 
 def _google_geocode(address: str) -> GeocodeResult | None:
@@ -110,6 +137,14 @@ def _google_geocode(address: str) -> GeocodeResult | None:
     if county in NYC_COUNTIES and not city:
         city = "New York"
 
+    # Resolve borough independently of city. For outer-borough addresses
+    # Google often fills locality with a neighborhood (Astoria, Williamsburg,
+    # Bay Ridge) and *also* omits sublocality_level_1, leaving borough None.
+    # Backfill from county so downstream NYC detection survives.
+    borough = _long("sublocality_level_1") or _long("sublocality") or None
+    if not borough and county in NYC_COUNTIES:
+        borough = _COUNTY_TO_BOROUGH.get(county)
+
     return GeocodeResult(
         address=first.get("formatted_address", address),
         lat=float(loc["lat"]),
@@ -119,7 +154,7 @@ def _google_geocode(address: str) -> GeocodeResult | None:
         state=_long("administrative_area_level_1", "") or "",
         zip=_long("postal_code", ""),
         bbl=None,  # filled in by NYC re-query if applicable
-        borough=_long("sublocality_level_1") or _long("sublocality") or None,
+        borough=borough,
         source="google",
     )
 

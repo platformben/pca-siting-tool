@@ -44,6 +44,25 @@ def _routes(s: str | None) -> str:
         return ""
     return "/".join(s.split())
 
+
+def _bbl_links(bbl: str | None) -> tuple[str | None, str | None]:
+    """Build ZoLa + DOB Property Profile deep-links from a 10-digit BBL.
+
+    BBL format: 1-digit borough + 5-digit block + 4-digit lot. Returns
+    (zola_url, dob_url) — both None if the BBL is malformed.
+    """
+    if not bbl or len(bbl) != 10 or not bbl.isdigit():
+        return (None, None)
+    boro = bbl[0]
+    block = str(int(bbl[1:6]))   # strip leading zeros for the path segment
+    lot = str(int(bbl[6:10]))
+    zola = f"https://zola.planning.nyc.gov/lot/{boro}/{block}/{lot}"
+    dob = (
+        "https://a810-bisweb.nyc.gov/bisweb/PropertyProfileOverviewServlet"
+        f"?boro={boro}&block={block}&lot={lot}"
+    )
+    return (zola, dob)
+
 # `evaluate` and its transitive imports (OCM, OSM, NYS Schools, Census, MTA,
 # NYC OpenData, etc.) are deferred until the user clicks Evaluate. Keeping
 # them out of the autocomplete path lowers the resident memory baseline.
@@ -225,11 +244,28 @@ if run_now and selected:
             f" · Owner: <strong style='color:{branding.NEAR_BLACK};'>{lot.owner}</strong>"
             if lot.owner else ""
         )
+        zola_url, dob_url = _bbl_links(lot.bbl)
+        link_parts = []
+        if zola_url:
+            link_parts.append(
+                f"<a href='{zola_url}' target='_blank' "
+                f"style='color:{branding.INDIGO};text-decoration:none;'>ZoLa ↗</a>"
+            )
+        if dob_url:
+            link_parts.append(
+                f"<a href='{dob_url}' target='_blank' "
+                f"style='color:{branding.INDIGO};text-decoration:none;'>DOB BIS ↗</a>"
+            )
+        links_html = (
+            f" · <span style='font-size:0.8125rem;'>{' · '.join(link_parts)}</span>"
+            if link_parts else ""
+        )
         st.markdown(
             f"<div style='font-size:0.95rem;color:{branding.NEAR_BLACK};margin-bottom:1rem;'>"
             f"<strong>{lot.address or '—'}</strong>"
             f" <span style='font-family:Geist Mono,monospace;color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
             f"BBL {lot.bbl}</span>"
+            f"{links_html}"
             f"<br/><span style='color:{branding.TEXT_SECONDARY};font-size:0.875rem;'>"
             f"Land use: {lot.landuse_code} — {lot.landuse_label} · "
             f"Building class: {lot.bldgclass or '—'}{owner_part}</span></div>",
