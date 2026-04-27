@@ -39,11 +39,15 @@ def gather(lat: float, lon: float) -> CommercialSnapshot:
     # CLOSED_PERMANENTLY count even though we don't display those spots in
     # the active-cotenants list. Operational status drops them from the
     # rendered list to avoid double-counting "co-tenants" with shuttered ones.
-    vacancy_count = sum(
-        1 for p in cotenants_raw
-        if p.business_status == "CLOSED_PERMANENTLY"
-    )
-    cotenants = [p for p in cotenants_raw if p.business_status != "CLOSED_PERMANENTLY"]
+    #
+    # getattr() is defensive: if a stale-bytecode deploy ever serves a Place
+    # class missing this field, we degrade to "no vacancy data" instead of
+    # 500-erroring the whole evaluation.
+    def _is_closed(p) -> bool:
+        return getattr(p, "business_status", None) == "CLOSED_PERMANENTLY"
+
+    vacancy_count = sum(1 for p in cotenants_raw if _is_closed(p))
+    cotenants = [p for p in cotenants_raw if not _is_closed(p)]
     cotenants.sort(key=lambda p: p.distance_ft)
 
     coffee = google_places.nearby_coffee(lat, lon, radius_ft=1000)
