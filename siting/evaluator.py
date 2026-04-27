@@ -8,7 +8,7 @@ from .commercial import CommercialSnapshot
 from .geo import haversine_feet
 from .rules import ny
 from .rules.ny import Finding
-from .sources import census_acs, geocode, ocm, subway, zillow_rent
+from .sources import census_acs, geocode, nys_liquor, ocm, subway, zillow_rent
 from .sources.geocode import GeocodeResult
 from .sources.ocm import Dispensary
 from .sources.subway import NearestStation
@@ -31,6 +31,7 @@ class Evaluation:
     demographics: TractDemographics | None = None
     zori: ZoriObservation | None = None
     nearest_dispensaries: list[Dispensary] = field(default_factory=list)
+    offpremises_zip_count: int | None = None  # NYS SLA off-premises licenses in this ZIP
     commercial: CommercialSnapshot | None = None
 
     @property
@@ -66,6 +67,12 @@ def evaluate(address: str) -> Evaluation:
     zori = zillow_rent.lookup(geo.zip)
     comm = commercial.gather(geo.lat, geo.lon)
     nearest_dispensaries = _nearest_competitors(geo.lat, geo.lon)
+    # SLA dataset is NY-only; skip the lookup for out-of-state addresses so a
+    # zero-count for, say, a New Jersey ZIP doesn't read as a real signal.
+    offpremises_zip_count = (
+        nys_liquor.lookup_count(geo.zip)
+        if (geo.state or "").upper() in {"NY", "NEW YORK"} else None
+    )
 
     return Evaluation(
         input_address=address,
@@ -75,6 +82,7 @@ def evaluate(address: str) -> Evaluation:
         demographics=demo,
         zori=zori,
         nearest_dispensaries=nearest_dispensaries,
+        offpremises_zip_count=offpremises_zip_count,
         commercial=comm,
     )
 

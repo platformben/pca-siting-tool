@@ -26,12 +26,13 @@ COLUMNS: list[str] = [
     "tract_mhhi", "tract_population",
     "tract_median_rent", "tract_rent_burden_pct",
     "zip_zori_asking_rent", "zip_zori_month",
+    "zip_offpremises_count",
     "nearest_competitor", "nearest_competitor_mi", "nearest_competitor_license_type",
     "nearest_supermarket", "nearest_supermarket_ft",
     "nearest_pharmacy", "nearest_pharmacy_ft",
     "coffee_count", "coffee_dollar_low", "coffee_dollar_high",
     "coffee_bean_rating", "coffee_avg_google_rating", "coffee_brands",
-    "cotenants_count", "attractions_count", "top_attraction",
+    "cotenants_count", "vacancy_count", "attractions_count", "top_attraction",
 ]
 
 
@@ -100,6 +101,7 @@ def record(evaluation) -> None:
             round(evaluation.zori.asking_rent) if evaluation.zori else None
         ),
         "zip_zori_month": evaluation.zori.month if evaluation.zori else None,
+        "zip_offpremises_count": evaluation.offpremises_zip_count,
         "nearest_competitor": (
             (evaluation.nearest_dispensaries[0].dba
              or evaluation.nearest_dispensaries[0].entity_name)
@@ -134,6 +136,7 @@ def record(evaluation) -> None:
         "coffee_avg_google_rating": cs.get("avg_rating"),
         "coffee_brands": ", ".join(cs.get("brands", [])) if cs.get("brands") else None,
         "cotenants_count": len(comm.cotenants) if comm else None,
+        "vacancy_count": comm.vacancy_count if comm else None,
         "attractions_count": len(comm.attractions) if comm else None,
         "top_attraction": (comm.attractions[0].name if comm and comm.attractions else None),
     }

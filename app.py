@@ -277,6 +277,22 @@ if run_now and selected:
                 burden_note,
             )
 
+        if result.offpremises_zip_count is not None and result.geo and result.geo.zip:
+            n = result.offpremises_zip_count
+            if n == 0:
+                detail = "No active off-premises licenses in this ZIP — regulatory cold spot or thin demand"
+            elif n < 5:
+                detail = f"Sparse off-premises retail · ZIP {result.geo.zip} · NYS SLA active"
+            elif n < 20:
+                detail = f"Moderate off-premises density · ZIP {result.geo.zip} · NYS SLA active"
+            else:
+                detail = f"Dense off-premises corridor · ZIP {result.geo.zip} · NYS SLA active"
+            branding.stat_band(
+                "Off-premises licenses",
+                f"{n}",
+                detail,
+            )
+
         if result.zori:
             z = result.zori
             try:
@@ -484,6 +500,20 @@ if run_now and selected:
                     top1,
                     f"Top types: {top_types}",
                 )
+                if comm.vacancy_count:
+                    flag = (
+                        "corridor distress flag (3+ in radius)"
+                        if comm.vacancy_count >= 3
+                        else "monitor for additional closures"
+                    )
+                    st.markdown(
+                        f"<div style='font-size:0.875rem;color:{branding.TEXT_SECONDARY};"
+                        f"margin:0.5rem 0 0.5rem 0;'>"
+                        f"<strong style='color:{branding.NEAR_BLACK};'>{comm.vacancy_count}</strong> "
+                        f"storefront{'s' if comm.vacancy_count != 1 else ''} marked permanently closed in radius "
+                        f"— {flag}</div>",
+                        unsafe_allow_html=True,
+                    )
                 with st.expander(f"All co-tenants ({len(comm.cotenants)})"):
                     rows = [
                         {

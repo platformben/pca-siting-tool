@@ -40,6 +40,7 @@ class Place:
     rating_count: int | None
     price_level: str | None
     price_range: dict | None = None  # {"start": int, "end": int, "currency": "USD"}
+    business_status: str | None = None  # OPERATIONAL | CLOSED_TEMPORARILY | CLOSED_PERMANENTLY
     distance_ft: float = 0.0
 
 
@@ -110,6 +111,7 @@ def _call(
                 rating_count=p.get("userRatingCount"),
                 price_level=p.get("priceLevel"),
                 price_range=price_range,
+                business_status=p.get("businessStatus"),
             )
         )
     return out
@@ -123,6 +125,7 @@ _ESSENTIALS = (
 _PRO_MIX = (
     _ESSENTIALS
     + ",places.formattedAddress,places.rating,places.userRatingCount"
+    + ",places.businessStatus"
 )
 _ENT_PRICE = _PRO_MIX + ",places.priceLevel,places.priceRange"
 

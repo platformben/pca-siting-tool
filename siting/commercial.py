@@ -21,15 +21,29 @@ class CommercialSnapshot:
     attractions: list = field(default_factory=list)
     nearest_supermarket: Place | None = None
     nearest_pharmacy: Place | None = None
+    # Storefronts in the cotenants pull marked CLOSED_PERMANENTLY by Google.
+    # Three or more in a 500 ft radius is the corridor-distress flag we surface
+    # in the UI — that's the threshold a retail-real-estate broker would call
+    # out unprompted on a walk-through.
+    vacancy_count: int = 0
 
 
 def gather(lat: float, lon: float) -> CommercialSnapshot:
     if not google_places.has_key():
         return CommercialSnapshot(has_places_key=False)
 
-    cotenants = google_places.nearby_cotenants(lat, lon, radius_ft=500)
-    for p in cotenants:
+    cotenants_raw = google_places.nearby_cotenants(lat, lon, radius_ft=500)
+    for p in cotenants_raw:
         p.distance_ft = haversine_feet(lat, lon, p.lat, p.lon)
+    # Vacancy proxy is computed off the unfiltered pull — we want the
+    # CLOSED_PERMANENTLY count even though we don't display those spots in
+    # the active-cotenants list. Operational status drops them from the
+    # rendered list to avoid double-counting "co-tenants" with shuttered ones.
+    vacancy_count = sum(
+        1 for p in cotenants_raw
+        if p.business_status == "CLOSED_PERMANENTLY"
+    )
+    cotenants = [p for p in cotenants_raw if p.business_status != "CLOSED_PERMANENTLY"]
     cotenants.sort(key=lambda p: p.distance_ft)
 
     coffee = google_places.nearby_coffee(lat, lon, radius_ft=1000)
@@ -61,6 +75,7 @@ def gather(lat: float, lon: float) -> CommercialSnapshot:
         attractions=attractions,
         nearest_supermarket=nearest_supermarket,
         nearest_pharmacy=nearest_pharmacy,
+        vacancy_count=vacancy_count,
     )
 
 
