@@ -2,7 +2,15 @@
 
 Docs:
   - DOE Location Points (schools, inc. pre-K): https://data.cityofnewyork.us/resource/jfju-ynrr.json
-  - DOB CofO Issuance (1938+): https://data.cityofnewyork.us/resource/bs8b-p36w.json
+  - DOB CofO Issuance (legacy BIS, 1938+): https://data.cityofnewyork.us/resource/bs8b-p36w.json
+  - DOB NOW Certificate of Occupancy:        https://data.cityofnewyork.us/resource/pkdm-hqz6.json
+
+NYC has been migrating C of O issuance from the legacy BIS system to DOB NOW
+since ~2020. Newer issuances appear in the DOB NOW feed only; older ones
+appear in legacy BIS only. We query both and merge — neither alone is
+complete. Even both together, NYC's Open Data feeds can lag the live BIS
+system, so a "no records" finding always points the user back to BIS for
+manual verification.
 
 All endpoints are SoQL (Socrata). App token increases rate limits but
 isn't required.
@@ -15,6 +23,7 @@ from dataclasses import dataclass
 
 FACILITIES_DB = "https://data.cityofnewyork.us/resource/ji82-xba5.json"
 DOB_COFO = "https://data.cityofnewyork.us/resource/bs8b-p36w.json"
+DOB_COFO_NOW = "https://data.cityofnewyork.us/resource/pkdm-hqz6.json"
 MAPPLUTO = "https://data.cityofnewyork.us/resource/64uk-42ks.json"
 
 # Facility groups that satisfy the OCM "pre-K through high school" rule.
@@ -38,9 +47,10 @@ class CertOfOccupancy:
     bin: str
     job_number: str
     issue_date: str
-    issue_type: str   # "Final" | "Temporary" | ...
+    issue_type: str   # "Final" | "Temporary" | filing-status code
     job_type: str     # "A1" (major alt), "NB" (new building), etc.
     bis_url: str
+    source: str = "BIS"  # "BIS" (legacy) | "DOB NOW"
 
 
 @dataclass
@@ -125,33 +135,53 @@ def schools_near(lat: float, lon: float, radius_ft: float = 1500.0) -> list[DoeS
 
 
 def cofo_for_bbl(bbl: str) -> list[CertOfOccupancy]:
-    """Return every C of O issuance on file for a BBL, newest first.
+    """Return every C of O issuance on file for a BBL across both NYC feeds.
 
-    Note: NYC Open Data only exposes issuance *metadata* — job #, issue
-    date, final/temp flag. The permissible-use narrative lives in the
-    actual C of O PDF on BIS, not this feed.
+    Queries the legacy BIS dataset and the DOB NOW dataset and merges. Newer
+    issuances (post ~2020) live in DOB NOW only; older ones live in legacy
+    BIS only. Either alone is incomplete.
+
+    Even the union is imperfect: NYC's Open Data ETL pipelines can lag the
+    live BIS system by weeks or omit some records entirely. Callers should
+    surface the BIS verification link in the no-records-found UI so users
+    can verify directly. (See bis_cofo_search_url below.)
     """
     if not bbl:
         return []
-    params = {
-        "bbl": bbl,
-        "$order": "c_o_issue_date DESC",
-        "$limit": "25",
-    }
+
+    out: list[CertOfOccupancy] = []
+    out.extend(_query_legacy_bis(bbl))
+    out.extend(_query_dob_now(bbl))
+    # Merge: dedupe by (issue_date, job_number) so a record present in both
+    # feeds doesn't double up. Keep the BIS source where dates collide
+    # (BIS has the original metadata; DOB NOW often has migrated copies).
+    seen: set[tuple[str, str]] = set()
+    deduped: list[CertOfOccupancy] = []
+    for c in out:
+        key = (c.issue_date, c.job_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(c)
+    deduped.sort(key=lambda c: c.issue_date, reverse=True)
+    return deduped
+
+
+def _query_legacy_bis(bbl: str) -> list[CertOfOccupancy]:
+    """Query the legacy BIS C of O dataset (`bs8b-p36w`)."""
+    params = {"bbl": bbl, "$order": "c_o_issue_date DESC", "$limit": "25"}
     try:
         r = requests.get(DOB_COFO, params=params, headers=_headers(), timeout=15)
         r.raise_for_status()
     except requests.RequestException:
         return []
+    rows = r.json()
+    if not isinstance(rows, list):
+        return []
     out = []
-    for row in r.json():
+    for row in rows:
         bin_ = row.get("bin_number") or row.get("bin") or ""
         job = row.get("job_number", "")
-        bis_url = (
-            f"https://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber={job}"
-            if job
-            else ""
-        )
         out.append(
             CertOfOccupancy(
                 bbl=row.get("bbl", ""),
@@ -160,10 +190,78 @@ def cofo_for_bbl(bbl: str) -> list[CertOfOccupancy]:
                 issue_date=(row.get("c_o_issue_date") or "")[:10],
                 issue_type=row.get("issue_type", "") or row.get("filing_status_raw", ""),
                 job_type=row.get("job_type", ""),
-                bis_url=bis_url,
+                bis_url=(
+                    f"https://a810-bisweb.nyc.gov/bisweb/JobsQueryByNumberServlet?passjobnumber={job}"
+                    if job else ""
+                ),
+                source="BIS",
             )
         )
     return out
+
+
+def _query_dob_now(bbl: str) -> list[CertOfOccupancy]:
+    """Query the DOB NOW C of O dataset (`pkdm-hqz6`).
+
+    DOB NOW uses different field names than legacy BIS — bbl is text,
+    bin is numeric, the issue-date column is c_of_o_issuance_date, the
+    job identifier is application_number. We normalize into the shared
+    CertOfOccupancy shape so the UI doesn't have to branch on source.
+    """
+    params = {"bbl": bbl, "$order": "c_of_o_issuance_date DESC", "$limit": "25"}
+    try:
+        r = requests.get(DOB_COFO_NOW, params=params, headers=_headers(), timeout=15)
+        r.raise_for_status()
+    except requests.RequestException:
+        return []
+    rows = r.json()
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for row in rows:
+        # DOB NOW issuance dates come back as "MM/DD/YY  HH:MM:SS PM" strings;
+        # normalize to ISO YYYY-MM-DD via the submitted_date timestamp instead.
+        iso_date = (row.get("submitted_date") or "")[:10]
+        app_num = row.get("application_number", "") or ""
+        bin_str = str(row.get("bin", "") or "")
+        out.append(
+            CertOfOccupancy(
+                bbl=str(row.get("bbl", "") or ""),
+                bin=bin_str,
+                job_number=app_num,
+                issue_date=iso_date,
+                issue_type=(row.get("c_of_o_filing_type") or "")
+                + (f" — {row.get('c_of_o_status')}" if row.get("c_of_o_status") else ""),
+                job_type=row.get("job_type", "") or "",
+                # DOB NOW has its own public portal — keyed on application number
+                bis_url=(
+                    f"https://a810-dobnow.nyc.gov/Publish/Index.html#"
+                    f"!/searchResults?textSearch={app_num}"
+                    if app_num else ""
+                ),
+                source="DOB NOW",
+            )
+        )
+    return out
+
+
+def bis_cofo_search_url(bbl: str | None) -> str | None:
+    """BIS C of O search deep-link by borough + block + lot.
+
+    Use this in the "no records found in Open Data" warning so the user
+    can click straight through to the live BIS system and confirm. The
+    Open Data feeds are imperfect — this is the authoritative source.
+    """
+    if not bbl or len(bbl) != 10 or not bbl.isdigit():
+        return None
+    boro = bbl[0]
+    block = str(int(bbl[1:6]))
+    lot = str(int(bbl[6:10]))
+    return (
+        "https://a810-bisweb.nyc.gov/bisweb/COsByLocationServlet"
+        f"?passjobnumber=&allbin=&allboro={boro}&allblock={block}&alllot={lot}"
+        "&applybutton=Apply&go7=+GO+&requestid=8"
+    )
 
 
 _LANDUSE_LABELS = {

@@ -315,15 +315,18 @@ def _worship_evidence(p) -> dict:
 
 
 def check_cofo(bbl: str | None) -> Finding:
-    """NYC Open Data only exposes C of O issuance *metadata* — not the
-    permissible-use text. This check confirms a C of O exists and links
-    out to BIS so you can read the actual PDF.
+    """Pulls C of O metadata from NYC Open Data (legacy BIS + DOB NOW feeds).
+
+    Both feeds are derived from the live BIS system via ETL pipelines that
+    can lag and that historically have missed records. The "no C of O found"
+    path always surfaces a BIS C of O search deep-link so the user can
+    verify directly.
     """
     rule = "DOB: Certificate of Occupancy"
     details = [
         "Retail dispensaries need a C of O that permits retail / stores / commercial / mercantile use.",
-        "NYC Open Data exposes issuance dates only — click through to BIS to read the PDF.",
         "Pre-1938 buildings often have no C of O on file; that's not a deal-breaker but requires a Letter of No Objection.",
+        "These feeds (legacy BIS + DOB NOW) can be incomplete — the live BIS system is the source of truth.",
     ]
     if not bbl:
         return Finding(
@@ -334,28 +337,43 @@ def check_cofo(bbl: str | None) -> Finding:
         )
     records = nyc_opendata.cofo_for_bbl(bbl)
     if not records:
+        # Surface the BIS C of O search URL so the user can click through
+        # and verify directly. The Open Data feeds miss records — we don't
+        # want a false-negative "no C of O" reading.
+        bis_search = nyc_opendata.bis_cofo_search_url(bbl)
+        details_with_link = list(details)
+        if bis_search:
+            details_with_link.append(
+                f"Verify on BIS directly: [BIS C of O search for BBL {bbl}]({bis_search})"
+            )
         return Finding(
             rule,
             "warn",
-            f"No C of O issuances on file for BBL {bbl}. Likely pre-1938 building or recent filing pending.",
-            details,
+            f"No C of O issuances on the NYC Open Data feeds (legacy BIS + DOB NOW) "
+            f"for BBL {bbl}. Could be pre-1938, a recent filing not yet ETL'd into "
+            f"Open Data, or a feed gap — verify on BIS directly.",
+            details_with_link,
         )
     latest = records[0]
+    sources = sorted({c.source for c in records})
+    sources_str = " + ".join(sources)
     ev = [
         {
             "issue_date": c.issue_date,
             "type": c.issue_type,
             "job_number": c.job_number,
             "job_type": c.job_type,
-            "bis_link": c.bis_url,
+            "source": c.source,
+            "link": c.bis_url,
         }
         for c in records[:5]
     ]
     return Finding(
         rule,
         "info",
-        f"{len(records)} C of O filing(s) on record. Latest: {latest.issue_date} "
-        f"({latest.issue_type}, job {latest.job_number}). Read PDF on BIS to confirm retail use.",
+        f"{len(records)} C of O filing(s) on record ({sources_str}). Latest: "
+        f"{latest.issue_date} ({latest.issue_type}, job {latest.job_number}). "
+        f"Read PDF on BIS to confirm retail use.",
         details,
         ev,
     )
