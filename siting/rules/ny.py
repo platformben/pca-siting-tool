@@ -228,6 +228,10 @@ def check_worship(lat: float, lon: float) -> Finding:
         w.source = source
         return w
 
+    # Search radius bumped to 600 ft for the FAIL/REVIEW logic AND to feed
+    # the 500 ft REVIEW buffer below — anything 200-500 ft warrants a manual
+    # cross-check on Google Maps because point-to-point haversine
+    # under-estimates edge-to-edge distance for adjacent buildings.
     places: list = []
     seen: set[tuple] = set()
 
@@ -257,48 +261,71 @@ def check_worship(lat: float, lon: float) -> Finding:
 
     places.sort(key=lambda p: p.distance_ft)
 
-    close = [p for p in places if p.distance_ft < 200]
+    close = [p for p in places if p.distance_ft < 200]    # FAIL/REVIEW zone
+    near = [p for p in places if 200 <= p.distance_ft < 500]  # REVIEW buffer
     details = [
-        "Rule: 200 ft from a building EXCLUSIVELY used as a house of worship.",
-        "NYC churches with apartments above = NOT exclusive, so OK.",
+        "Hard rule: 200 ft from a building EXCLUSIVELY used as a house of worship.",
+        "Soft buffer: anything 200–500 ft is REVIEW — point-to-point distance "
+        "under-counts edge-to-edge for adjacent buildings, and OCM may measure differently.",
+        "NYC churches with apartments above = NOT exclusive, so OK at the 200 ft rule.",
         "Sources: OCM (authoritative) + OSM (exclusive-use hints) + Google Places.",
     ]
-    rule_name = "OCM: house of worship (200 ft rule)"
-    if not close:
-        if not places:
+    rule_name = "OCM: house of worship (200 ft hard / 500 ft review)"
+
+    # No worship found at all — warn, manual cross-check needed
+    if not places:
+        return Finding(
+            rule_name,
+            "warn",
+            "No houses of worship found in OCM, OSM, or Google Places within 600 ft search radius. Rule triggers at 200 ft — cross-check Google Maps.",
+            details,
+        )
+
+    # Inside 200 ft — exclusive-use heuristic decides FAIL vs REVIEW
+    if close:
+        blocking = []
+        probably_ok = []
+        for p in close:
+            exclusive, reason = osm.building_exclusive_use_hint(p.tags)
+            entry = _worship_evidence(p) | {"likely_exclusive": exclusive, "reason": reason}
+            (blocking if exclusive else probably_ok).append(entry)
+        if blocking:
             return Finding(
                 rule_name,
-                "warn",
-                "No houses of worship found in OCM, OSM, or Google Places within 600 ft search radius. Rule triggers at 200 ft — cross-check Google Maps.",
+                "fail",
+                f"{len(blocking)} house of worship within 200 ft, appearing exclusively used — FAIL pending verification",
                 details,
+                blocking + probably_ok,
             )
         return Finding(
             rule_name,
-            "pass",
-            f"Nearest house of worship is {places[0].distance_ft:.0f} ft away — well past the 200 ft rule.",
+            "warn",
+            f"{len(probably_ok)} house of worship within 200 ft, likely mixed-use (e.g. apartments above). Verify on-site.",
             details,
-            [_worship_evidence(places[0])],
+            probably_ok,
         )
-    blocking = []
-    probably_ok = []
-    for p in close:
-        exclusive, reason = osm.building_exclusive_use_hint(p.tags)
-        entry = _worship_evidence(p) | {"likely_exclusive": exclusive, "reason": reason}
-        (blocking if exclusive else probably_ok).append(entry)
-    if blocking:
+
+    # 200–500 ft buffer — REVIEW, not PASS
+    if near:
+        evidence = [_worship_evidence(p) for p in near]
+        nearest = near[0]
         return Finding(
             rule_name,
-            "fail",
-            f"{len(blocking)} house of worship within 200 ft, appearing exclusively used — FAIL pending verification",
+            "warn",
+            f"{len(near)} house of worship between 200 and 500 ft — clears the hard "
+            f"200 ft rule but worth a Google Maps walk to verify edge-to-edge distance. "
+            f"Nearest: {nearest.name} at {nearest.distance_ft:.0f} ft.",
             details,
-            blocking + probably_ok,
+            evidence,
         )
+
+    # Past 500 ft — clean PASS
     return Finding(
         rule_name,
-        "warn",
-        f"{len(probably_ok)} house of worship within 200 ft, likely mixed-use (e.g. apartments above). Verify on-site.",
+        "pass",
+        f"Nearest house of worship is {places[0].distance_ft:.0f} ft away — well past the 200 ft rule and 500 ft review buffer.",
         details,
-        probably_ok,
+        [_worship_evidence(places[0])],
     )
 
 
