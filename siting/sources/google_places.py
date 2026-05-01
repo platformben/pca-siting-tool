@@ -130,6 +130,39 @@ _PRO_MIX = (
 _ENT_PRICE = _PRO_MIX + ",places.priceLevel,places.priceRange"
 
 
+def _call_split(
+    lat: float,
+    lon: float,
+    types: list[str],
+    radius_m: float,
+    max_results: int,
+    field_mask: str,
+) -> list[Place]:
+    """Defensive variant of _call() that issues one request per type and merges.
+
+    Places API (New) `searchNearby` silently returns zero results for some
+    mixed-type queries — the full worship list
+    `[church, synagogue, mosque, hindu_temple, place_of_worship]` zeroes
+    out at small radii even though `[church]` alone returns matches at the
+    same coordinates and radius. Confirmed against 101 Avenue U Brooklyn,
+    where Victory Outreach (294 ft, primaryType=church) was being missed
+    by the mixed call but found by a per-type call.
+
+    For compliance-critical lookups (worship + schools) the cost of N extra
+    API calls is worth the correctness guarantee. Dedupes by place_id so
+    a venue tagged with multiple included types isn't double-returned.
+    """
+    out: list[Place] = []
+    seen: set[str] = set()
+    for t in types:
+        for p in _call(lat, lon, [t], radius_m, max_results, field_mask):
+            if p.place_id in seen:
+                continue
+            seen.add(p.place_id)
+            out.append(p)
+    return out
+
+
 def nearby_cotenants(lat: float, lon: float, radius_ft: float = 500.0) -> list[Place]:
     """Proxy for foot-traffic partners: restaurants, bars, gyms, retail, grocery."""
     radius_m = radius_ft / 3.28084
@@ -148,17 +181,28 @@ def nearby_coffee(lat: float, lon: float, radius_ft: float = 1000.0) -> list[Pla
 
 
 def nearby_private_schools(lat: float, lon: float, radius_ft: float = 1500.0) -> list[Place]:
-    """Backup for pre-Ks and private schools the NYC DOE / OSM feeds miss."""
+    """Backup for pre-Ks and private schools the NYC DOE / OSM feeds miss.
+
+    Uses _call_split because Places (New) drops some preschool / specialty
+    school records when the full type list is requested in a single call.
+    """
     radius_m = radius_ft / 3.28084
     types = ["school", "preschool", "primary_school", "secondary_school"]
-    return _call(lat, lon, types, radius_m, max_results=20, field_mask=_PRO_MIX)
+    return _call_split(lat, lon, types, radius_m, max_results=20, field_mask=_PRO_MIX)
 
 
 def nearby_worship(lat: float, lon: float, radius_ft: float = 600.0) -> list[Place]:
-    """Backup for houses of worship beyond OSM coverage."""
+    """Backup for houses of worship beyond OSM coverage.
+
+    Uses _call_split because Places (New) silently zeroes out the mixed
+    worship-type list at small radii — confirmed bug against 101 Avenue U
+    Brooklyn, where the mixed call returned 0 records but per-type calls
+    returned a primaryType=church 294 ft away (well inside the § 72 200 ft
+    rule's ambiguity zone).
+    """
     radius_m = radius_ft / 3.28084
     types = ["church", "mosque", "synagogue", "hindu_temple", "place_of_worship"]
-    return _call(lat, lon, types, radius_m, max_results=15, field_mask=_PRO_MIX)
+    return _call_split(lat, lon, types, radius_m, max_results=15, field_mask=_PRO_MIX)
 
 
 def nearby_supermarkets(lat: float, lon: float, radius_ft: float = 2640.0) -> list[Place]:
