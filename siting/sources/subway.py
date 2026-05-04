@@ -20,7 +20,16 @@ from ..geo import haversine_feet
 DATA_DIR = Path(__file__).parents[2] / "data"
 DEFAULT_WEEKDAY = DATA_DIR / "subway_weekday.csv"
 DEFAULT_ANNUAL = DATA_DIR / "subway_annual.csv"
-MTA_STATIONS_URL = "https://data.ny.gov/resource/39hk-dx4f.json"
+
+# NY State Open Data deprecated 39hk-dx4f (the dataset went down to 1 row,
+# which made every NYC address falsely match "137 St-City College" in
+# Manhattan). 5f5g-n3cz ("MTA Subway Stations and Complexes") replaces it
+# with 445 station+complex records and uses plain latitude/longitude.
+# Override via env var if NYS rotates the dataset ID again.
+MTA_STATIONS_URL = os.getenv(
+    "MTA_STATIONS_URL",
+    "https://data.ny.gov/resource/5f5g-n3cz.json",
+)
 
 
 @dataclass
@@ -109,8 +118,13 @@ class NearestStation:
 def load_mta_stations() -> list[dict]:
     """Pull MTA station list from the NY Open Data SODA API.
 
-    Returns a list of dicts (not a DataFrame). Each dict has at least
-    ``stop_name``, ``borough``, ``daytime_routes``, ``lat``, ``lon``.
+    Returns a list of dicts. Each dict has ``stop_name``, ``borough``,
+    ``daytime_routes``, ``lat``, ``lon``. Tolerates schema variants:
+    the old `39hk-dx4f` dataset used `gtfs_latitude`/`gtfs_longitude`
+    while the replacement `5f5g-n3cz` uses `latitude`/`longitude`. We
+    try both so a future schema flip doesn't silently break the lookup
+    (which previously caused every Brooklyn address to match a Harlem
+    station).
     """
     try:
         r = requests.get(MTA_STATIONS_URL, params={"$limit": "5000"}, timeout=20)
@@ -118,14 +132,17 @@ def load_mta_stations() -> list[dict]:
     except requests.RequestException:
         return []
     rows = r.json()
+    if not isinstance(rows, list):
+        return []
     out: list[dict] = []
     for row in rows:
-        lat = _parse_float(row.get("gtfs_latitude"))
-        lon = _parse_float(row.get("gtfs_longitude"))
+        # Prefer plain lat/lon (5f5g-n3cz), fall back to gtfs_* (legacy).
+        lat = _parse_float(row.get("latitude") or row.get("gtfs_latitude"))
+        lon = _parse_float(row.get("longitude") or row.get("gtfs_longitude"))
         if lat is None or lon is None:
             continue
         out.append({
-            "stop_name": row.get("stop_name") or "",
+            "stop_name": row.get("stop_name") or row.get("display_name") or "",
             "borough": row.get("borough") or "",
             "daytime_routes": row.get("daytime_routes") or "",
             "lat": lat,
