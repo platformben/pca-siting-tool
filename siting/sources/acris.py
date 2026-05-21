@@ -70,12 +70,13 @@ def recent_deeds_for_bbl(bbl: str | None, limit: int = 5) -> list[Deed]:
             timeout=15,
         )
         r.raise_for_status()
-    except requests.RequestException:
+        legals_rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
 
     doc_ids: list[str] = []
     seen: set[str] = set()
-    for row in r.json():
+    for row in legals_rows:
         did = row.get("document_id")
         if did and did not in seen:
             doc_ids.append(did)
@@ -102,11 +103,12 @@ def recent_deeds_for_bbl(bbl: str | None, limit: int = 5) -> list[Deed]:
             timeout=15,
         )
         r.raise_for_status()
-    except requests.RequestException:
+        master_rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
 
     out: list[Deed] = []
-    for row in r.json():
+    for row in master_rows:
         amt_raw = row.get("document_amt")
         try:
             amt = int(float(amt_raw)) if amt_raw not in (None, "", "0") else None

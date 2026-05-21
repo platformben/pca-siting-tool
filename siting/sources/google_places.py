@@ -77,10 +77,11 @@ def _call(
     try:
         r = requests.post(PLACES_NEARBY, json=body, headers=headers, timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out = []
-    for p in r.json().get("places", []):
+    for p in payload.get("places", []):
         loc = p.get("location") or {}
         try:
             plat = float(loc.get("latitude"))
@@ -280,10 +281,11 @@ def autocomplete_address(query: str) -> list[str]:
             timeout=5,
         )
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out: list[str] = []
-    for s in r.json().get("suggestions", []) or []:
+    for s in payload.get("suggestions", []) or []:
         pred = s.get("placePrediction") or {}
         text = (pred.get("text") or {}).get("text")
         if text and text not in out:

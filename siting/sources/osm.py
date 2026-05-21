@@ -73,10 +73,11 @@ def _run(q: str) -> list[OsmFeature]:
     try:
         r = requests.post(OVERPASS, data={"data": q}, timeout=30)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out: list[OsmFeature] = []
-    for el in r.json().get("elements", []):
+    for el in payload.get("elements", []):
         if el["type"] == "node":
             lat, lon = el.get("lat"), el.get("lon")
         else:

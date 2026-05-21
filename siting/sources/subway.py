@@ -129,9 +129,9 @@ def load_mta_stations() -> list[dict]:
     try:
         r = requests.get(MTA_STATIONS_URL, params={"$limit": "5000"}, timeout=20)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
-    rows = r.json()
     if not isinstance(rows, list):
         return []
     out: list[dict] = []

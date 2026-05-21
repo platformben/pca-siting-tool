@@ -97,9 +97,10 @@ def nearby_schools(lat: float, lon: float, radius_ft: float = 1500.0) -> list[Sc
         try:
             r = requests.get(endpoint, params=params, timeout=15)
             r.raise_for_status()
-        except requests.RequestException:
+            payload = r.json()
+        except (requests.RequestException, ValueError):
             continue
-        for feat in r.json().get("features", []):
+        for feat in payload.get("features", []):
             a = feat["attributes"]
             geom = feat.get("geometry") or {}
             glat, glon = geom.get("y"), geom.get("x")
@@ -140,10 +141,11 @@ def nearby_worship(lat: float, lon: float, radius_ft: float = 600.0) -> list[Wor
     try:
         r = requests.get(OCM_WORSHIP, params=params, timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out: list[Worship] = []
-    for feat in r.json().get("features", []):
+    for feat in payload.get("features", []):
         a = feat["attributes"]
         geom = feat.get("geometry") or {}
         glat, glon = geom.get("y"), geom.get("x")
@@ -179,10 +181,11 @@ def _query(endpoint: str, lat: float, lon: float, radius_m: float, status: str) 
     try:
         r = requests.get(endpoint, params=params, timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out: list[Dispensary] = []
-    for feat in r.json().get("features", []):
+    for feat in payload.get("features", []):
         a = feat["attributes"]
         geom = feat.get("geometry") or {}
         glat = geom.get("y") or a.get("Latitude")

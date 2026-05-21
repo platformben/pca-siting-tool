@@ -115,9 +115,12 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
     try:
         r = requests.get(ACS, params=params, timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
+        # ValueError covers json.JSONDecodeError — Census returns an HTML
+        # rate-limit page on quota exhaustion which crashed every eval
+        # before this guard.
         return None
-    rows = r.json()
     if not rows or len(rows) < 2:
         return None
     # Header row tells us the column order — don't rely on positional destructure
@@ -171,9 +174,10 @@ def _tract_for_point(lat: float, lon: float) -> str | None:
     try:
         r = requests.get(FCC_BLOCK, params={"latitude": lat, "longitude": lon, "format": "json"}, timeout=10)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    block = r.json().get("Block", {}).get("FIPS")
+    block = payload.get("Block", {}).get("FIPS")
     if not block or len(block) < 11:
         return None
     return block[:11]

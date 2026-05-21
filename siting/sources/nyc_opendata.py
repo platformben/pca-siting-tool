@@ -112,10 +112,11 @@ def schools_near(lat: float, lon: float, radius_ft: float = 1500.0) -> list[DoeS
     try:
         r = requests.get(FACILITIES_DB, params=params, headers=_headers(), timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
     out = []
-    for row in r.json():
+    for row in rows:
         try:
             slat = float(row.get("latitude"))
             slon = float(row.get("longitude"))
@@ -173,9 +174,9 @@ def _query_legacy_bis(bbl: str) -> list[CertOfOccupancy]:
     try:
         r = requests.get(DOB_COFO, params=params, headers=_headers(), timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
-    rows = r.json()
     if not isinstance(rows, list):
         return []
     out = []
@@ -212,9 +213,9 @@ def _query_dob_now(bbl: str) -> list[CertOfOccupancy]:
     try:
         r = requests.get(DOB_COFO_NOW, params=params, headers=_headers(), timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return []
-    rows = r.json()
     if not isinstance(rows, list):
         return []
     out = []
@@ -294,9 +295,9 @@ def pluto_for_bbl(bbl: str) -> PlutoLot | None:
         r = requests.get(MAPPLUTO, params={"bbl": bbl, "$limit": "1"},
                          headers=_headers(), timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    rows = r.json()
     if not rows:
         return None
     row = rows[0]

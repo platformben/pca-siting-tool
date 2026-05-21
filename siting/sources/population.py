@@ -52,9 +52,9 @@ def _acs_place_population(city: str, state: str) -> bool | None:
     try:
         r = requests.get(ACS_PLACE, params=params, timeout=15)
         r.raise_for_status()
-    except requests.RequestException:
+        rows = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    rows = r.json()
     if not rows or len(rows) < 2:
         return None
     header = rows[0]

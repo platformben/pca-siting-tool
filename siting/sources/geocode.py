@@ -110,9 +110,9 @@ def _google_geocode(address: str) -> GeocodeResult | None:
             timeout=10,
         )
         r.raise_for_status()
-    except requests.RequestException:
+        data = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    data = r.json()
     if data.get("status") != "OK" or not data.get("results"):
         return None
     first = data["results"][0]
@@ -163,9 +163,10 @@ def _nyc_geosearch(address: str) -> GeocodeResult | None:
     try:
         r = requests.get(NYC_GEOSEARCH, params={"text": address, "size": 1}, timeout=10)
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    features = r.json().get("features", [])
+    features = payload.get("features", [])
     if not features:
         return None
     f = features[0]
@@ -195,9 +196,10 @@ def _census_geocode(address: str) -> GeocodeResult | None:
             timeout=15,
         )
         r.raise_for_status()
-    except requests.RequestException:
+        payload = r.json()
+    except (requests.RequestException, ValueError):
         return None
-    matches = r.json().get("result", {}).get("addressMatches", [])
+    matches = payload.get("result", {}).get("addressMatches", [])
     if not matches:
         return None
     m = matches[0]
