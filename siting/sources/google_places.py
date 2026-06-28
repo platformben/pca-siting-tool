@@ -181,15 +181,27 @@ def nearby_coffee(lat: float, lon: float, radius_ft: float = 1000.0) -> list[Pla
     return _call(lat, lon, ["cafe", "coffee_shop"], radius_m, max_results=10, field_mask=_ENT_PRICE)
 
 
+SCHOOL_PRIMARY_TYPES = frozenset(
+    {"school", "preschool", "primary_school", "secondary_school"}
+)
+
+
 def nearby_private_schools(lat: float, lon: float, radius_ft: float = 1500.0) -> list[Place]:
     """Backup for pre-Ks and private schools the NYC DOE / OSM feeds miss.
 
     Uses _call_split because Places (New) drops some preschool / specialty
     school records when the full type list is requested in a single call.
+
+    Filters results to places whose PRIMARY type is school-related — Places
+    (New) sometimes returns a place that has a school type in its `types[]`
+    array but a non-educational primary type (e.g. a wellness shop with
+    primary_type='service' that also tags itself as 'school'). Those false
+    positives previously triggered FAIL in the proximity gate.
     """
     radius_m = radius_ft / 3.28084
     types = ["school", "preschool", "primary_school", "secondary_school"]
-    return _call_split(lat, lon, types, radius_m, max_results=20, field_mask=_PRO_MIX)
+    raw = _call_split(lat, lon, types, radius_m, max_results=20, field_mask=_PRO_MIX)
+    return [p for p in raw if (p.primary_type or "").lower() in SCHOOL_PRIMARY_TYPES]
 
 
 def nearby_worship(lat: float, lon: float, radius_ft: float = 600.0) -> list[Place]:

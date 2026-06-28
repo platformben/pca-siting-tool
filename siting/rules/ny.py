@@ -105,9 +105,18 @@ def check_schools(
     def _key(la, lo):
         return (round(la, 5), round(lo, 5))
 
+    # "Authoritative" = the source flagged would actually hold up under
+    # § 72 enforcement, i.e. the location is registered with NYS Department of
+    # Education as a school. OCM's NYS_Schools layer pulls from NYSED directly.
+    # NYC DCP Facilities is partly authoritative — the "SCHOOLS (K-12)" facgroup
+    # is sourced from NYC DOE (city's DOE, which the state recognizes), but its
+    # "DAY CARE AND PRE-KINDERGARTEN" facgroup is daycares licensed by NY OCFS,
+    # NOT NYSED — those don't legally count as schools under § 72.
+    # OSM + Google Places are crowd/POI data, never authoritative.
     for s in ocm_schools:
         schools.append({
             "source": "OCM / NYSED",
+            "authoritative": True,
             "name": s.name,
             "address": f"{s.address}, {s.city}".strip(", "),
             "distance_ft": haversine_feet(lat, lon, s.lat, s.lon),
@@ -119,8 +128,10 @@ def check_schools(
     for s in doe:
         if _key(s.lat, s.lon) in seen:
             continue
+        is_authoritative = "SCHOOLS (K-12)" in (s.school_type or "").upper()
         schools.append({
             "source": "NYC DCP Facilities",
+            "authoritative": is_authoritative,
             "name": s.name,
             "address": s.address,
             "distance_ft": haversine_feet(lat, lon, s.lat, s.lon),
@@ -134,6 +145,7 @@ def check_schools(
             continue
         schools.append({
             "source": "OSM",
+            "authoritative": False,
             "name": o.name or "(unnamed)",
             "address": o.street or "",
             "distance_ft": haversine_feet(lat, lon, o.lat, o.lon),
@@ -147,6 +159,7 @@ def check_schools(
             continue
         schools.append({
             "source": "Google Places",
+            "authoritative": False,
             "name": g.name,
             "address": g.address,
             "distance_ft": haversine_feet(lat, lon, g.lat, g.lon),
@@ -158,6 +171,8 @@ def check_schools(
     schools.sort(key=lambda x: x["distance_ft"])
 
     conflicts = [s for s in schools if s["distance_ft"] < 500 and s["same_street"]]
+    auth_conflicts = [c for c in conflicts if c["authoritative"]]
+    non_auth_conflicts = [c for c in conflicts if not c["authoritative"]]
     warn_same_street_far = [
         s for s in schools
         if 500 <= s["distance_ft"] < 1000 and s["same_street"]
@@ -166,32 +181,64 @@ def check_schools(
         s for s in schools
         if s["distance_ft"] < 500 and not s["same_street"]
     ]
+    auth_close_diff_street = [c for c in warn_close_diff_street if c["authoritative"]]
     details = [
-        "Rule: same street AND <500 ft from school front door (pre-K through high school).",
+        "Hard rule: same street AND <500 ft from school front door (pre-K through high school).",
+        "Authoritative sources for the rule: NYS Department of Education + NYC DOE K-12 list.",
+        "Daycares (NY OCFS-licensed) are NOT schools under § 72 — they trigger REVIEW, not FAIL.",
         "Corner-lot schools count as being on both streets — confirm visually.",
-        "Sources: OCM/NYSED (authoritative) + NYC DCP Facilities + OSM + Google Places.",
+        "Sources: OCM/NYSED (authoritative) + NYC DCP Facilities (K-12 authoritative, daycare not) + OSM + Google Places.",
     ]
-    if conflicts:
+    rule_name = "OCM: school proximity (500 ft same-street rule)"
+
+    # FAIL only when a registered school flagged it. Anything else is REVIEW
+    # with explicit guidance to check NYSED before concluding compliance —
+    # OSM/Google could be daycares, after-school programs, tutoring centers,
+    # learning centers, or test prep places, none of which legally count.
+    if auth_conflicts:
         return Finding(
-            "OCM: school proximity (500 ft same-street rule)",
+            rule_name,
             "fail",
-            f"{len(conflicts)} school within 500 ft on the same street — FAIL",
+            f"{len(auth_conflicts)} NYS DOE-registered school within 500 ft on the same street — FAIL",
             details,
-            conflicts,
+            auth_conflicts + non_auth_conflicts,
+        )
+    if non_auth_conflicts:
+        names = ", ".join(f"{c['name']} ({c['source']})" for c in non_auth_conflicts[:3])
+        return Finding(
+            rule_name,
+            "warn",
+            f"{len(non_auth_conflicts)} potential school(s) within 500 ft same-street "
+            f"but NONE registered with NYS DOE — likely daycare, pre-K (OCFS-licensed), "
+            f"after-school program, or tutoring center. "
+            f"Verify each on NYSED before concluding compliance: {names}.",
+            details,
+            non_auth_conflicts,
+        )
+    if auth_close_diff_street:
+        closest = auth_close_diff_street[0]
+        return Finding(
+            rule_name,
+            "warn",
+            f"NYS DOE-registered school within 500 ft (different street): {closest['name']} "
+            f"({closest['distance_ft']:.0f} ft). Verify corner-lot status.",
+            details,
+            warn_close_diff_street,
         )
     if warn_close_diff_street:
         closest = warn_close_diff_street[0]
         return Finding(
-            "OCM: school proximity (500 ft same-street rule)",
+            rule_name,
             "warn",
-            f"School within 500 ft (different street): {closest['name']} "
-            f"({closest['distance_ft']:.0f} ft). Verify corner-lot status.",
+            f"Potential school within 500 ft (different street): {closest['name']} "
+            f"({closest['source']}) at {closest['distance_ft']:.0f} ft. "
+            f"Not in NYS DOE — likely daycare or non-school facility, but worth verifying.",
             details,
             warn_close_diff_street,
         )
     if warn_same_street_far:
         return Finding(
-            "OCM: school proximity (500 ft same-street rule)",
+            rule_name,
             "info",
             f"Same-street school(s) between 500-1000 ft — compliant but note for walkup.",
             details,
@@ -199,14 +246,14 @@ def check_schools(
         )
     if not schools:
         return Finding(
-            "OCM: school proximity (500 ft same-street rule)",
+            rule_name,
             "warn",
             "No schools found in OCM/NYSED, NYC DCP, OSM, or Google Places within 1,500 ft. Cross-check Google Maps to confirm.",
             details,
         )
     closest = schools[0]
     return Finding(
-        "OCM: school proximity (500 ft same-street rule)",
+        rule_name,
         "pass",
         f"Nearest school {closest['distance_ft']:.0f} ft away — no same-street conflict.",
         details,
