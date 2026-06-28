@@ -119,6 +119,7 @@ def check_schools(
             "authoritative": True,
             "name": s.name,
             "address": f"{s.address}, {s.city}".strip(", "),
+            "lat": s.lat, "lon": s.lon,
             "distance_ft": haversine_feet(lat, lon, s.lat, s.lon),
             "same_street": _same_street(s.address),
             "grades": s.layer_label,
@@ -134,6 +135,7 @@ def check_schools(
             "authoritative": is_authoritative,
             "name": s.name,
             "address": s.address,
+            "lat": s.lat, "lon": s.lon,
             "distance_ft": haversine_feet(lat, lon, s.lat, s.lon),
             "same_street": _same_street(s.address),
             "grades": s.grades,
@@ -148,6 +150,7 @@ def check_schools(
             "authoritative": False,
             "name": o.name or "(unnamed)",
             "address": o.street or "",
+            "lat": o.lat, "lon": o.lon,
             "distance_ft": haversine_feet(lat, lon, o.lat, o.lon),
             "same_street": _same_street(o.street or ""),
             "grades": "",
@@ -162,6 +165,7 @@ def check_schools(
             "authoritative": False,
             "name": g.name,
             "address": g.address,
+            "lat": g.lat, "lon": g.lon,
             "distance_ft": haversine_feet(lat, lon, g.lat, g.lon),
             "same_street": _same_street(g.address),
             "grades": "",
@@ -169,6 +173,49 @@ def check_schools(
         })
         seen.add(_key(g.lat, g.lon))
     schools.sort(key=lambda x: x["distance_ft"])
+
+    # Parks adjacent to schools: NYC's "Jointly Operated Playgrounds" program
+    # makes many small parks co-administered with NYSED — the playground IS
+    # part of the school's grounds for distance-rule purposes. We can't tell
+    # from public data which parks are formally co-administered, so we surface
+    # park-adjacent-to-school as REVIEW with explicit guidance: any park
+    # within ~300 ft of an authoritative school AND within 500 ft of the
+    # candidate is a candidate-extended school zone worth verifying with
+    # NYSED before concluding compliance.
+    parks = osm.nearby_parks(lat, lon, radius_ft=500)
+    park_conflicts: list[dict] = []
+    auth_schools_found = [s for s in schools if s["authoritative"]]
+    for park in parks:
+        park_d_to_candidate = haversine_feet(lat, lon, park.lat, park.lon)
+        if park_d_to_candidate >= 500:
+            continue  # too far to matter for the 500 ft rule
+        # Look for any authoritative school within ~300 ft of this park's center.
+        # 300 ft is generous: NYC playgrounds are typically 100-200 ft from the
+        # adjacent school building.
+        adjacent_school = None
+        adjacent_distance = None
+        for s in auth_schools_found:
+            d = haversine_feet(park.lat, park.lon, s["lat"], s["lon"])
+            if d < 300 and (adjacent_distance is None or d < adjacent_distance):
+                adjacent_school = s
+                adjacent_distance = d
+        if adjacent_school is None:
+            continue
+        park_conflicts.append({
+            "source": "OSM (park) + " + adjacent_school["source"],
+            "authoritative": False,  # park alone is REVIEW; the school it's attached to FAILed elsewhere
+            "name": park.name or "(unnamed park)",
+            "address": park.street or "",
+            "lat": park.lat, "lon": park.lon,
+            "distance_ft": park_d_to_candidate,
+            "same_street": _same_street(park.street or ""),
+            "grades": "park co-administered with school",
+            "type": (
+                f"Park adjacent to school: {adjacent_school['name']} "
+                f"(~{adjacent_distance:.0f} ft from park center)"
+            ),
+            "adjacent_school": adjacent_school["name"],
+        })
 
     conflicts = [s for s in schools if s["distance_ft"] < 500 and s["same_street"]]
     auth_conflicts = [c for c in conflicts if c["authoritative"]]
@@ -186,8 +233,10 @@ def check_schools(
         "Hard rule: same street AND <500 ft from school front door (pre-K through high school).",
         "Authoritative sources for the rule: NYS Department of Education + NYC DOE K-12 list.",
         "Daycares (NY OCFS-licensed) are NOT schools under § 72 — they trigger REVIEW, not FAIL.",
+        "Parks adjacent to NYSED schools may be co-administered (NYC Jointly Operated Playgrounds) "
+        "— the schoolyard counts as school grounds for the distance rule. Verify with NYSED.",
         "Corner-lot schools count as being on both streets — confirm visually.",
-        "Sources: OCM/NYSED (authoritative) + NYC DCP Facilities (K-12 authoritative, daycare not) + OSM + Google Places.",
+        "Sources: OCM/NYSED (authoritative) + NYC DCP Facilities (K-12 authoritative, daycare not) + OSM (parks) + Google Places.",
     ]
     rule_name = "OCM: school proximity (500 ft same-street rule)"
 
@@ -201,7 +250,27 @@ def check_schools(
             "fail",
             f"{len(auth_conflicts)} NYS DOE-registered school within 500 ft on the same street — FAIL",
             details,
-            auth_conflicts + non_auth_conflicts,
+            auth_conflicts + non_auth_conflicts + park_conflicts,
+        )
+    # Park-adjacent-to-school conflicts: the school itself is >500 ft or
+    # different-street, but its co-administered playground reaches inside the
+    # candidate's 500 ft rule. NYC parks adjacent to NYSED schools are often
+    # jointly operated — treat as REVIEW with explicit verify-with-NYSED note.
+    same_street_park_conflicts = [p for p in park_conflicts if p["same_street"]]
+    if same_street_park_conflicts:
+        items = ", ".join(
+            f"{p['name']} (adj. {p['adjacent_school']})"
+            for p in same_street_park_conflicts[:3]
+        )
+        return Finding(
+            rule_name,
+            "warn",
+            f"{len(same_street_park_conflicts)} park(s) within 500 ft same-street that "
+            f"appear adjacent to a NYSED-registered school — likely co-administered as a "
+            f"jointly operated playground (NYC pattern). The schoolyard extends the regulated "
+            f"zone. Verify with NYSED before concluding compliance: {items}.",
+            details,
+            same_street_park_conflicts + non_auth_conflicts,
         )
     if non_auth_conflicts:
         names = ", ".join(f"{c['name']} ({c['source']})" for c in non_auth_conflicts[:3])
