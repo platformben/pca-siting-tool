@@ -48,6 +48,17 @@ ADULT_21_TO_34_VARS = (
     "B01001_036E",  # Female, 30 to 34
 )
 
+# B15003 (Educational Attainment, 25+ population) — bachelor's degree and
+# higher are cells 022-025. Summed and divided by B15003_001E (total 25+)
+# to get the "% bachelor's or higher" line operators read as an
+# income-and-acceptance proxy.
+BACHELORS_PLUS_VARS = (
+    "B15003_022E",  # Bachelor's degree
+    "B15003_023E",  # Master's degree
+    "B15003_024E",  # Professional degree
+    "B15003_025E",  # Doctorate degree
+)
+
 
 @dataclass
 class TractDemographics:
@@ -57,6 +68,11 @@ class TractDemographics:
     median_gross_rent: int | None  # B25064 — median gross monthly rent (incl. utilities)
     adult_21_plus: int | None      # Cannabis-legal adult population (derived)
     adult_21_to_34: int | None     # 21–34 early-adopter cohort (derived)
+    median_age: float | None              # B01002 — tract median age (years)
+    pct_bachelors_plus: float | None      # B15003 — bachelor's+ share of 25+ pop
+    pct_renter_occupied: float | None     # B25003 — renter share of occupied units
+    pct_transit_commute: float | None     # B08301 — public-transit share of workers 16+
+    pct_below_poverty: float | None       # B17001 — below-poverty share of pop for whom status determined
     land_area_sqmi: float | None
 
     @property
@@ -98,11 +114,21 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
     if not tract:
         return None
     state, county, trct = tract[:2], tract[2:5], tract[5:]
-    # B19013_001E = MHHI, B01003_001E = total pop, B25064_001E = median gross rent.
-    # Add the under-21 and 21-34 sex × age cells so we can derive 21+ market.
+    # Headline vars:
+    #   B19013_001E — median household income
+    #   B01003_001E — total population
+    #   B25064_001E — median gross rent
+    #   B01002_001E — median age
+    # Plus age-cohort cells for 21+ derivation, education attainment cells
+    # for bachelor's+ ratio, and four paired numerator/denominator vars
+    # for the renter / transit-commute / poverty ratios computed below.
     all_vars = (
-        "B19013_001E", "B01003_001E", "B25064_001E",
+        "B19013_001E", "B01003_001E", "B25064_001E", "B01002_001E",
         *UNDER_21_VARS, *ADULT_21_TO_34_VARS,
+        "B15003_001E", *BACHELORS_PLUS_VARS,
+        "B25003_001E", "B25003_003E",  # total occupied / renter occupied
+        "B08301_001E", "B08301_010E",  # total commute / public transit
+        "B17001_001E", "B17001_002E",  # poverty universe / below poverty
     )
     params = {
         "get": ",".join(all_vars),
@@ -138,6 +164,24 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
         except (TypeError, ValueError):
             return None
 
+    def _float(code: str) -> float | None:
+        v = by_name.get(code)
+        if not v or v == ACS_NULL:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _ratio_pct(numer_code: str, denom_code: str) -> float | None:
+        """Numerator / denominator as a percentage. None if either is missing
+        or the denominator is zero (which Census reports for small / suppressed
+        tracts and would otherwise raise ZeroDivisionError)."""
+        n, d = _int(numer_code), _int(denom_code)
+        if n is None or not d:
+            return None
+        return (n / d) * 100
+
     total_pop = _int("B01003_001E")
 
     # 21+ derivation: total - sum(under-21 cells across both sexes). Falls
@@ -159,6 +203,16 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
     else:
         adult_21_to_34 = None
 
+    # Bachelor's+ share of the 25+ population. Sum the four degree levels
+    # (bachelor's, master's, professional, doctorate) and divide by total 25+.
+    pop_25_plus = _int("B15003_001E")
+    bach_vals = [_int(v) for v in BACHELORS_PLUS_VARS]
+    if pop_25_plus and any(v is not None for v in bach_vals):
+        bach_sum = sum(v for v in bach_vals if v is not None)
+        pct_bachelors_plus = (bach_sum / pop_25_plus) * 100
+    else:
+        pct_bachelors_plus = None
+
     return TractDemographics(
         tract_fips=tract,
         mhhi=_int("B19013_001E"),
@@ -166,6 +220,11 @@ def demographics_for_point(lat: float, lon: float) -> TractDemographics | None:
         median_gross_rent=_int("B25064_001E"),
         adult_21_plus=adult_21_plus,
         adult_21_to_34=adult_21_to_34,
+        median_age=_float("B01002_001E"),
+        pct_bachelors_plus=pct_bachelors_plus,
+        pct_renter_occupied=_ratio_pct("B25003_003E", "B25003_001E"),
+        pct_transit_commute=_ratio_pct("B08301_010E", "B08301_001E"),
+        pct_below_poverty=_ratio_pct("B17001_002E", "B17001_001E"),
         land_area_sqmi=None,  # TIGER land area requires a separate lookup; left off v1
     )
 

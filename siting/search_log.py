@@ -31,6 +31,9 @@ COLUMNS: list[str] = [
     "nearest_subway", "nearest_subway_ft", "subway_weekday_2023",
     "tract_mhhi", "tract_population",
     "tract_adult_21_plus", "tract_pct_21_plus", "tract_adult_21_to_34",
+    "tract_median_age", "tract_pct_bachelors_plus",
+    "tract_pct_renter_occupied", "tract_pct_transit_commute",
+    "tract_pct_below_poverty",
     "tract_median_rent", "tract_rent_burden_pct",
     "zip_zori_asking_rent", "zip_zori_month",
     "zip_offpremises_count",
@@ -127,6 +130,26 @@ def record(evaluation) -> None:
             if demo and demo.pct_21_plus is not None else None
         ),
         "tract_adult_21_to_34": demo.adult_21_to_34 if demo else None,
+        "tract_median_age": (
+            round(demo.median_age, 1)
+            if demo and demo.median_age is not None else None
+        ),
+        "tract_pct_bachelors_plus": (
+            round(demo.pct_bachelors_plus, 1)
+            if demo and demo.pct_bachelors_plus is not None else None
+        ),
+        "tract_pct_renter_occupied": (
+            round(demo.pct_renter_occupied, 1)
+            if demo and demo.pct_renter_occupied is not None else None
+        ),
+        "tract_pct_transit_commute": (
+            round(demo.pct_transit_commute, 1)
+            if demo and demo.pct_transit_commute is not None else None
+        ),
+        "tract_pct_below_poverty": (
+            round(demo.pct_below_poverty, 1)
+            if demo and demo.pct_below_poverty is not None else None
+        ),
         "tract_median_rent": demo.median_gross_rent if demo else None,
         "tract_rent_burden_pct": (
             round(demo.rent_burden_pct, 1)

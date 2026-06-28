@@ -487,6 +487,39 @@ if run_now and selected:
                 f"{pct_part}{cohort_part}",
             )
 
+        # Demographic profile — five dimensions in one compact block, not five
+        # more stat bands. Each line is muted, dense, scannable.
+        if d and any(v is not None for v in (
+            d.median_age, d.pct_bachelors_plus, d.pct_renter_occupied,
+            d.pct_transit_commute, d.pct_below_poverty,
+        )):
+            def _stat(label: str, value: str | None) -> str:
+                if value is None:
+                    return ""
+                return (
+                    f"<span style='display:inline-block;margin-right:0.85rem;'>"
+                    f"<span style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                    f"letter-spacing:0.1em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};'>"
+                    f"{label}</span> "
+                    f"<strong style='color:{branding.NEAR_BLACK};'>{value}</strong></span>"
+                )
+
+            parts = [
+                _stat("Median age", f"{d.median_age:.0f}" if d.median_age is not None else None),
+                _stat("Bachelor's+", f"{d.pct_bachelors_plus:.0f}%" if d.pct_bachelors_plus is not None else None),
+                _stat("Renter", f"{d.pct_renter_occupied:.0f}%" if d.pct_renter_occupied is not None else None),
+                _stat("Transit commute", f"{d.pct_transit_commute:.0f}%" if d.pct_transit_commute is not None else None),
+                _stat("Below poverty", f"{d.pct_below_poverty:.0f}%" if d.pct_below_poverty is not None else None),
+            ]
+            st.markdown(
+                f"<div style='margin:0.5rem 0 0.5rem 0;line-height:1.7;font-size:0.875rem;'>"
+                f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+                f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+                f"margin-bottom:0.4rem;'>DEMOGRAPHIC PROFILE · ACS 5-YEAR</div>"
+                f"{''.join(parts)}</div>",
+                unsafe_allow_html=True,
+            )
+
         if d and d.median_gross_rent:
             burden = d.rent_burden_pct
             if burden is not None:
