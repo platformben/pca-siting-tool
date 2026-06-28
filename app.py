@@ -424,6 +424,65 @@ if run_now and selected:
                     unsafe_allow_html=True,
                 )
 
+    # ---------- Performance estimate (PCA overlay) ----------
+    # Internal-only section. Renders only when both the portfolio data and the
+    # PCA_OVERLAY_KEY secret are configured — without them, find_comparables
+    # returns None and we skip rendering entirely. Public deploy stays public.
+    if result.pca_comparables and not result.pca_comparables.is_empty():
+        cset = result.pca_comparables
+        branding.section("Performance estimate · PCA overlay")
+        st.caption(
+            "Internal use only. Annualized run-rate inferred from the most-similar "
+            "mature stores in the PCA portfolio (≥12 months open). Comparable-set "
+            "methodology, not regression — apply C-suite judgment."
+        )
+
+        rng = cset.revenue_range_annualized()
+        if rng:
+            lo, mid, hi = rng
+            conf = cset.confidence()
+            conf_label = {
+                "high":   "High confidence",
+                "medium": "Medium confidence",
+                "low":    "Low confidence",
+            }.get(conf, "Confidence unknown")
+            conf_detail = {
+                "high":   "3+ strong matches (similarity ≥80)",
+                "medium": "3+ decent matches (similarity ≥60)",
+                "low":    "few or weak matches — directional only",
+            }.get(conf, "")
+            branding.stat_band(
+                "Estimated annualized revenue",
+                f"${lo/1e6:.1f}M – ${hi/1e6:.1f}M",
+                f"Median: ${mid/1e6:.2f}M · {conf_label} ({conf_detail})",
+            )
+
+        st.markdown(
+            f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+            f"letter-spacing:0.12em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+            f"margin:1.25rem 0 0.5rem 0;'>{len(cset.matches)} CLOSEST COMPARABLES</div>",
+            unsafe_allow_html=True,
+        )
+        for m in cset.matches:
+            annualized = m.store.revenue_wk * 52
+            st.markdown(
+                f"<div style='font-size:0.95rem;margin:0.4rem 0;display:flex;"
+                f"justify-content:space-between;align-items:baseline;gap:1rem;'>"
+                f"<div>"
+                f"<strong>{m.store.store}</strong> "
+                f"<span style='font-family:Geist Mono,monospace;color:{branding.TEXT_SECONDARY};"
+                f"font-size:0.75rem;letter-spacing:0.08em;'>SIM {m.similarity_pct:.0f}%</span>"
+                f"<br/>"
+                f"<span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                f"{m.store.address}</span></div>"
+                f"<div style='text-align:right;white-space:nowrap;'>"
+                f"<strong>${annualized/1e6:.2f}M</strong>"
+                f"<br/><span style='color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
+                f"${m.store.revenue_wk:,.0f}/wk · {m.store.margin_pct:.0f}% margin</span></div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
     # ---------- Commercial snapshot ----------
     branding.section("Commercial snapshot")
 

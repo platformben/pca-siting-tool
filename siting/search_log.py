@@ -35,6 +35,9 @@ COLUMNS: list[str] = [
     "tract_pct_renter_occupied", "tract_pct_transit_commute",
     "tract_pct_below_poverty",
     "tract_median_rent", "tract_rent_burden_pct",
+    "pca_overlay_low_annualized", "pca_overlay_median_annualized",
+    "pca_overlay_high_annualized", "pca_overlay_confidence",
+    "competitor_count_within_1mi",
     "zip_zori_asking_rent", "zip_zori_month",
     "zip_offpremises_count",
     "nearest_competitor", "nearest_competitor_mi", "nearest_competitor_license_type",
@@ -50,6 +53,16 @@ def _log() -> list[dict[str, Any]]:
     if LOG_KEY not in st.session_state:
         st.session_state[LOG_KEY] = []
     return st.session_state[LOG_KEY]
+
+
+def _pca_revenue(evaluation, idx: int) -> int | None:
+    """Pull one of (low, median, high) from the comparables range, rounded
+    to the nearest dollar. Returns None when the overlay isn't active."""
+    cset = getattr(evaluation, "pca_comparables", None)
+    if not cset or cset.is_empty():
+        return None
+    rng = cset.revenue_range_annualized()
+    return round(rng[idx]) if rng else None
 
 
 def record(evaluation) -> None:
@@ -155,6 +168,15 @@ def record(evaluation) -> None:
             round(demo.rent_burden_pct, 1)
             if demo and demo.rent_burden_pct is not None else None
         ),
+        "pca_overlay_low_annualized": _pca_revenue(evaluation, 0),
+        "pca_overlay_median_annualized": _pca_revenue(evaluation, 1),
+        "pca_overlay_high_annualized": _pca_revenue(evaluation, 2),
+        "pca_overlay_confidence": (
+            evaluation.pca_comparables.confidence()
+            if evaluation.pca_comparables and not evaluation.pca_comparables.is_empty()
+            else None
+        ),
+        "competitor_count_within_1mi": evaluation.competitor_count_within_1mi,
         "zip_zori_asking_rent": (
             round(evaluation.zori.asking_rent) if evaluation.zori else None
         ),

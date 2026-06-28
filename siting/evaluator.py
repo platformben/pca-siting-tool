@@ -9,12 +9,14 @@ from .geo import haversine_feet
 from .rules import ny
 from .rules.ny import Finding
 from .sources import (
-    acris, census_acs, geocode, nyc_opendata, nys_liquor, ocm, subway, zillow_rent,
+    acris, census_acs, geocode, nyc_opendata, nys_liquor, ocm,
+    pca_comparables, subway, zillow_rent,
 )
 from .sources.acris import Deed
 from .sources.geocode import GeocodeResult
 from .sources.nyc_opendata import PlutoLot
 from .sources.ocm import Dispensary
+from .sources.pca_comparables import ComparableSet
 from .sources.subway import NearestStation
 from .sources.census_acs import TractDemographics
 from .sources.zillow_rent import ZoriObservation
@@ -39,6 +41,8 @@ class Evaluation:
     pluto: PlutoLot | None = None              # NYC parcel record (NY-only)
     recent_deeds: list[Deed] = field(default_factory=list)  # ACRIS, newest-first (NY-only)
     commercial: CommercialSnapshot | None = None
+    competitor_count_within_1mi: int = 0       # active dispensaries inside 1 mi
+    pca_comparables: ComparableSet | None = None  # internal PCA overlay (gated)
 
     @property
     def overall(self) -> str:
@@ -78,13 +82,31 @@ def evaluate(address: str) -> Evaluation:
     demo = census_acs.demographics_for_point(geo.lat, geo.lon)
     zori = zillow_rent.lookup(geo.zip)
     comm = commercial.gather(geo.lat, geo.lon)
-    nearest_dispensaries = _nearest_competitors(geo.lat, geo.lon)
+    nearest_dispensaries, competitor_count_1mi = _nearest_competitors(geo.lat, geo.lon)
     # SLA dataset is NY-only; skip the lookup for out-of-state addresses so a
     # zero-count for, say, a New Jersey ZIP doesn't read as a real signal.
     offpremises_zip_count = (
         nys_liquor.lookup_count(geo.zip)
         if (geo.state or "").upper() in {"NY", "NEW YORK"} else None
     )
+
+    # PCA portfolio overlay — only when both the data and the password key
+    # are configured. Builds a feature vector from the just-fetched
+    # evaluation data and finds the K nearest mature stores.
+    pca_set = None
+    if pca_comparables.overlay_enabled() and demo is not None:
+        query_features = _comparable_features(
+            demo=demo,
+            zori=zori,
+            zip_offpremises=offpremises_zip_count,
+            competitor_count_1mi=competitor_count_1mi,
+            nearest_competitor_mi=(
+                (nearest_dispensaries[0].distance_ft / 5280)
+                if nearest_dispensaries else None
+            ),
+        )
+        if query_features:
+            pca_set = pca_comparables.find_comparables(query_features)
 
     return Evaluation(
         input_address=address,
@@ -98,16 +120,17 @@ def evaluate(address: str) -> Evaluation:
         pluto=pluto,
         recent_deeds=recent_deeds,
         commercial=comm,
+        competitor_count_within_1mi=competitor_count_1mi,
+        pca_comparables=pca_set,
     )
 
 
-def _nearest_competitors(lat: float, lon: float) -> list[Dispensary]:
-    """Top 3 active dispensaries within the competitive radius, by walking distance.
+def _nearest_competitors(lat: float, lon: float) -> tuple[list[Dispensary], int]:
+    """Top 3 active dispensaries by walking distance, plus the within-1mi count.
 
-    Filters to the active-license endpoint only — pending licenses are future
-    competitors but not present-day ones. OCM's record schema includes a free-text
-    `operational_status` we surface in the UI but don't filter on, since that
-    field is inconsistently populated.
+    The within-1mi count is a strong predictor of revenue per PCA's portfolio
+    analysis (pass1), so it rides along on the same OCM call to avoid a
+    second round-trip.
     """
     competitors = [
         d for d in ocm.nearby_dispensaries(lat, lon, radius_ft=COMPETITOR_RADIUS_FT)
@@ -116,4 +139,37 @@ def _nearest_competitors(lat: float, lon: float) -> list[Dispensary]:
     for d in competitors:
         d.distance_ft = haversine_feet(lat, lon, d.lat, d.lon)
     competitors.sort(key=lambda d: d.distance_ft)
-    return competitors[:3]
+    count_1mi = sum(1 for d in competitors if d.distance_ft <= 5280)
+    return competitors[:3], count_1mi
+
+
+def _comparable_features(
+    demo: TractDemographics,
+    zori: ZoriObservation | None,
+    zip_offpremises: int | None,
+    competitor_count_1mi: int,
+    nearest_competitor_mi: float | None,
+) -> dict[str, float]:
+    """Build the feature vector for PCA-comparables similarity scoring.
+
+    Returns only the features that are actually populated — find_comparables()
+    handles partial vectors by renormalizing weights.
+    """
+    f: dict[str, float] = {}
+    if demo:
+        if demo.total_population is not None:
+            f["population"] = float(demo.total_population)
+        if demo.mhhi is not None:
+            f["median_hh_income"] = float(demo.mhhi)
+        if demo.median_age is not None:
+            f["median_age"] = float(demo.median_age)
+        if demo.pct_bachelors_plus is not None:
+            f["bachelors_pct"] = float(demo.pct_bachelors_plus)
+        if demo.median_gross_rent is not None:
+            f["median_gross_rent"] = float(demo.median_gross_rent)
+    f["comp_within_1mi"] = float(competitor_count_1mi)
+    if nearest_competitor_mi is not None:
+        f["comp_nearest_mi"] = float(nearest_competitor_mi)
+    if zip_offpremises is not None:
+        f["dispensary_count_in_zip"] = float(zip_offpremises)
+    return f
