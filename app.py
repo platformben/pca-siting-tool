@@ -125,29 +125,113 @@ branding.hero(
 )
 
 
-@st.dialog("Search log", width="large")
-def _show_log_dialog() -> None:
-    n = search_log.count()
-    st.caption(f"{n} address{'es' if n != 1 else ''} evaluated this session.")
-    if not n:
-        st.info("Run an evaluation to start logging.")
-        return
-    rows = search_log.to_rows()
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    cols = st.columns([1, 1, 2])
-    with cols[0]:
-        st.download_button(
-            label="Download .csv",
-            data=search_log.to_csv_bytes(),
-            file_name="pca-scout-log.csv",
-            mime="text/csv",
-            use_container_width=True,
+# Session state for Compare mode. Full Evaluation objects live here keyed
+# by resolved address so the sidebar can re-render any of them as a hero
+# card without re-running the evaluation pipeline.
+_EVALS_KEY = "_pca_session_evals"
+_SELECTED_KEY = "_pca_compare_selected"
+_COMPARE_MODE_KEY = "_pca_compare_mode"
+
+def _evals() -> dict:
+    if _EVALS_KEY not in st.session_state:
+        st.session_state[_EVALS_KEY] = {}
+    return st.session_state[_EVALS_KEY]
+
+
+def _selected_for_compare() -> set:
+    if _SELECTED_KEY not in st.session_state:
+        st.session_state[_SELECTED_KEY] = set()
+    return st.session_state[_SELECTED_KEY]
+
+
+def _render_sidebar() -> bool:
+    """Render the persistent sidebar with evaluated candidates + Compare button.
+
+    Returns True if the main panel should render Compare mode, False for
+    normal single-eval mode.
+    """
+    evals = _evals()
+    selected = _selected_for_compare()
+
+    with st.sidebar:
+        # Brand mark + section label
+        st.markdown(
+            f"<div style='font-family:Geist Mono,monospace;text-transform:uppercase;"
+            f"letter-spacing:0.16em;font-size:0.6875rem;color:{branding.TEXT_SECONDARY};"
+            f"margin-bottom:0.75rem;'>EVALUATED THIS SESSION</div>",
+            unsafe_allow_html=True,
         )
-    with cols[1]:
-        if st.button("Clear log", use_container_width=True):
-            search_log.clear()
+
+        if not evals:
+            st.caption("No evaluations yet. Search an address to begin.")
+            return False
+
+        st.caption(
+            f"{len(evals)} address{'es' if len(evals) != 1 else ''} evaluated. "
+            f"Select 2+ to compare."
+        )
+
+        # One row per saved evaluation: checkbox + verdict chip + address +
+        # revenue range (when overlay is active).
+        new_selected = set()
+        for addr, ev in evals.items():
+            cset = ev.pca_comparables
+            rev_str = ""
+            if cset and not cset.is_empty():
+                rng = cset.revenue_range_annualized()
+                if rng:
+                    rev_str = f" · ${rng[0]/1e6:.1f}–${rng[2]/1e6:.1f}M"
+            verdict = ev.overall
+            checked = st.checkbox(
+                f"**{verdict}**{rev_str}  \n_{addr[:60]}_",
+                value=addr in selected,
+                key=f"_cmp_{addr}",
+            )
+            if checked:
+                new_selected.add(addr)
+        st.session_state[_SELECTED_KEY] = new_selected
+
+        st.markdown("---")
+
+        # Compare mode is sticky — clicking the button flips the flag in
+        # session state, and the compare view shows an "Exit" button.
+        in_compare = st.session_state.get(_COMPARE_MODE_KEY, False)
+        compare_label = (
+            f"Exit Compare" if in_compare
+            else f"Compare selected ({len(new_selected)})"
+        )
+        if st.button(
+            compare_label,
+            disabled=(not in_compare and len(new_selected) < 2),
+            use_container_width=True,
+            type="primary",
+        ):
+            st.session_state[_COMPARE_MODE_KEY] = not in_compare
             st.rerun()
-    st.caption("Log lives only in this browser session — download before closing the tab.")
+
+        # Utility buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="Download .csv",
+                data=search_log.to_csv_bytes(),
+                file_name="pca-scout-log.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with col2:
+            if st.button("Clear all", use_container_width=True):
+                st.session_state[_EVALS_KEY] = {}
+                st.session_state[_SELECTED_KEY] = set()
+                search_log.clear()
+                st.rerun()
+
+        st.caption(
+            "Session-only — close the tab and data clears. Download the CSV "
+            "to keep an audit trail."
+        )
+
+    return st.session_state.get(_COMPARE_MODE_KEY, False)
 
 
 # ---------- Address input ----------
@@ -176,7 +260,65 @@ with btn_col:
 st.caption(f"Address suggestions: {_autocomplete_source}")
 
 
-# ---------- Result rendering ----------
+# ---------- Sidebar + Compare mode ----------
+# Sidebar renders the per-session candidate list. Returns True when the user
+# clicks "Compare selected" with 2+ checkboxes ticked.
+_compare_mode = _render_sidebar()
+
+
+def _render_compare_view(selected_addrs: set[str]) -> None:
+    """Render hero cards for selected candidates side-by-side."""
+    branding.section(f"Compare candidates ({len(selected_addrs)})")
+    if not selected_addrs:
+        st.caption(
+            "No candidates selected. Use the sidebar checkboxes to pick 2+ "
+            "addresses, then re-enter Compare mode."
+        )
+        return
+    if len(selected_addrs) < 2:
+        st.caption(
+            "Compare mode needs 2+ candidates. Add another from the sidebar."
+        )
+    else:
+        st.caption(
+            "Side-by-side hero verdict + revenue range. Use the sidebar to "
+            "add/remove candidates or exit Compare mode."
+        )
+    evals = _evals()
+    cards = [evals[a] for a in selected_addrs if a in evals]
+    # Streamlit columns top out at usable widths around 3; cap to keep cards
+    # legible. Excess selections render in a second row.
+    PER_ROW = 3
+    for row_start in range(0, len(cards), PER_ROW):
+        row = cards[row_start: row_start + PER_ROW]
+        cols = st.columns(len(row))
+        for col, ev in zip(cols, row):
+            with col:
+                cset = ev.pca_comparables
+                rev_range = (
+                    cset.revenue_range_annualized()
+                    if cset and not cset.is_empty() else None
+                )
+                conf = cset.confidence() if cset and not cset.is_empty() else None
+                zola, dob = _bbl_links(ev.geo.bbl) if ev.geo else (None, None)
+                branding.hero_verdict(
+                    overall=ev.overall,
+                    findings=ev.findings,
+                    address=ev.geo.address if ev.geo else ev.input_address,
+                    bbl=ev.geo.bbl if ev.geo else None,
+                    zola_url=zola,
+                    dob_url=dob,
+                    revenue_range=rev_range,
+                    confidence=conf,
+                )
+
+
+if _compare_mode:
+    _render_compare_view(_selected_for_compare())
+    st.stop()
+
+
+# ---------- Single-candidate result rendering ----------
 
 if run_now and selected:
     with st.spinner("Geocoding and running compliance checks…"):
@@ -187,6 +329,10 @@ if run_now and selected:
 
         result = evaluate(selected.strip())
         search_log.record(result)
+        # Cache the full Evaluation in session state so Compare mode can
+        # re-render it without re-running the pipeline.
+        if result.geo:
+            _evals()[result.geo.address] = result
         gc.collect()
 
     if not result.geo:
@@ -220,20 +366,29 @@ if run_now and selected:
         f"https://www.google.com/maps/search/?api=1&query={geo.lat},{geo.lon}",
     )
 
-    # ---------- Compliance ----------
-    branding.section("Compliance")
-    st.caption(
-        "Gates from NY Cannabis Law § 72: 1,000 / 2,000 ft from another dispensary, "
-        "500 ft + same street from pre-K – HS schools, 200 ft from buildings exclusively used as houses of worship."
-    )
-    for f in result.findings:
-        with st.container(border=True):
+    # ---------- Compliance — evidence-only ----------
+    # Hero card above already shows every gate with its chip and one-liner.
+    # This section is for the analyst who wants to dig into evidence + rule
+    # text. Default-collapsed expanders only — no card chrome that duplicates
+    # the hero grid.
+    with st.expander("Compliance — full rule text + evidence", expanded=False):
+        st.caption(
+            "Gates from NY Cannabis Law § 72: 1,000 / 2,000 ft from another dispensary, "
+            "500 ft + same street from pre-K – HS schools, 200 ft from buildings "
+            "exclusively used as houses of worship."
+        )
+        for f in result.findings:
             branding.finding_header(f.rule, f.status, f.summary)
             for d in f.details:
                 st.caption(d)
             if f.evidence:
-                with st.expander(f"Evidence ({len(f.evidence)})"):
+                with st.expander(f"Evidence ({len(f.evidence)})", expanded=False):
                     st.dataframe(f.evidence, use_container_width=True, hide_index=True)
+            st.markdown(
+                f"<div style='height:1px;background:{branding.BORDER_SUBTLE};"
+                f"margin:0.75rem 0;'></div>",
+                unsafe_allow_html=True,
+            )
 
     # ---------- The lot ----------
     # NYC-only parcel detail. Renders right after Compliance so the operator
@@ -910,13 +1065,7 @@ else:
     branding.checks_panel()
 
 
-# ---------- Footer: discrete log access + brand sign-off ----------
-
-_n = search_log.count()
-_log_label = f"Search log ({_n})" if _n else "Search log"
-_log_l, _log_pad = st.columns([1, 4])
-with _log_l:
-    if st.button(_log_label, use_container_width=True, type="secondary"):
-        _show_log_dialog()
+# ---------- Footer ----------
+# Search log + download moved to the persistent sidebar. Footer is brand-only.
 
 branding.signoff()
