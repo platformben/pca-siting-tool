@@ -276,6 +276,105 @@ def _css() -> str:
     .pca-verdict--fail {{ border-left-color: #a23838; }}
     .pca-verdict--fail .pca-verdict__value {{ color: #a23838; }}
 
+    /* Hero — verdict + gates grid + revenue, single screen above the fold */
+    .pca-hero-card {{
+      display: grid;
+      grid-template-columns: 1fr 1.4fr;
+      gap: 1.75rem;
+      padding: 1.5rem 1.75rem;
+      border: 1px solid {BORDER_SUBTLE};
+      border-left: 4px solid {INDIGO};
+      background: {WHITE};
+      margin-bottom: 1.25rem;
+    }}
+    .pca-hero-card--with-overlay {{
+      grid-template-columns: 1fr 1.2fr 1fr;
+    }}
+    .pca-hero-card--pass {{ border-left-color: #2f7a4f; }}
+    .pca-hero-card--review {{ border-left-color: #b8861a; }}
+    .pca-hero-card--fail {{ border-left-color: #a23838; }}
+    .pca-hero__label {{
+      font-family: 'Geist Mono', 'SF Mono', monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 0.6875rem;
+      color: {TEXT_SECONDARY};
+      margin-bottom: 0.5rem;
+    }}
+    .pca-hero__verdict {{
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.015em;
+      margin-bottom: 0.5rem;
+    }}
+    .pca-hero__verdict--pass {{ color: #2f7a4f; }}
+    .pca-hero__verdict--review {{ color: #b8861a; }}
+    .pca-hero__verdict--fail {{ color: #a23838; }}
+    .pca-hero__summary {{
+      font-size: 0.9375rem;
+      color: {NEAR_BLACK};
+      margin-top: 0.5rem;
+      line-height: 1.4;
+    }}
+    .pca-hero__summary em {{
+      font-family: 'Noto Serif', Charter, Georgia, serif !important;
+      font-style: italic;
+      color: {INDIGO};
+    }}
+    .pca-hero__gates {{
+      display: grid;
+      gap: 0.4rem;
+    }}
+    .pca-hero__gate {{
+      display: grid;
+      grid-template-columns: 70px 110px 1fr;
+      align-items: baseline;
+      gap: 0.75rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid {BORDER_SUBTLE};
+      font-size: 0.875rem;
+    }}
+    .pca-hero__gate:last-child {{ border-bottom: none; }}
+    .pca-hero__gate-chip {{
+      font-family: 'Geist Mono', 'SF Mono', monospace;
+      font-size: 0.625rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      text-align: center;
+    }}
+    .pca-hero__gate-chip--pass {{ background:#e8f3ed; color:#2f7a4f; }}
+    .pca-hero__gate-chip--warn {{ background:#faf2e0; color:#b8861a; }}
+    .pca-hero__gate-chip--fail {{ background:#f5e3e3; color:#a23838; }}
+    .pca-hero__gate-chip--info {{ background:{SURFACE_SUBTLE}; color:{INDIGO}; }}
+    .pca-hero__gate-label {{
+      font-weight: 600;
+      color: {NEAR_BLACK};
+    }}
+    .pca-hero__gate-detail {{
+      color: {TEXT_SECONDARY};
+      font-size: 0.8125rem;
+      line-height: 1.35;
+    }}
+    .pca-hero__revenue {{
+      text-align: left;
+    }}
+    .pca-hero__revenue-value {{
+      font-size: 1.65rem;
+      font-weight: 700;
+      color: {INDIGO};
+      line-height: 1.05;
+      letter-spacing: -0.01em;
+    }}
+    .pca-hero__revenue-meta {{
+      font-size: 0.8125rem;
+      color: {TEXT_SECONDARY};
+      margin-top: 0.4rem;
+      line-height: 1.5;
+    }}
+
     /* Lavender stat band — for commercial metrics */
     .pca-stat-band {{
       background: {SURFACE_SUBTLE};
@@ -455,6 +554,155 @@ def overall_verdict(overall: str) -> None:
         <div class="pca-verdict pca-verdict--{klass}">
           <span class="pca-verdict__label">Overall</span>
           <span class="pca-verdict__value">{overall}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# Maps the long rule names from siting/rules/ny.py to short hero-grid labels.
+# The keys are the prefix substring we match against the full rule string.
+_GATE_LABELS: list[tuple[str, str]] = [
+    ("dispensary proximity", "Dispensary"),
+    ("school proximity",     "School"),
+    ("house of worship",     "Worship"),
+    ("Zoning",               "Zoning"),
+    ("Certificate of Occupancy", "C of O"),
+]
+
+
+def _short_gate_label(rule: str) -> str:
+    """Map a long Finding rule string to a short hero-grid label."""
+    for needle, label in _GATE_LABELS:
+        if needle.lower() in rule.lower():
+            return label
+    return rule.split(":")[-1].strip() if ":" in rule else rule
+
+
+def _gate_one_liner(summary: str, max_chars: int = 70) -> str:
+    """Trim a Finding summary to a single readable line for the gates grid.
+
+    The full summary is still available in the Compliance section below — the
+    grid one-liner just needs to convey the gist."""
+    s = summary.strip()
+    # Cut at em-dash, period, or "FAIL/REVIEW" marker — the second half of
+    # most finding summaries is regulatory restatement, not new information.
+    for cut in (" — ", " - "):
+        if cut in s:
+            s = s.split(cut)[0]
+            break
+    if len(s) > max_chars:
+        s = s[: max_chars - 1].rstrip() + "…"
+    return s
+
+
+def hero_verdict(
+    overall: str,
+    findings: list,
+    address: str,
+    bbl: str | None = None,
+    zola_url: str | None = None,
+    dob_url: str | None = None,
+    revenue_range: tuple[float, float, float] | None = None,
+    confidence: str | None = None,
+) -> None:
+    """Compact hero card: overall verdict + 5-gate grid + optional revenue.
+
+    Renders above-the-fold for single-screen decisioning. The full Compliance
+    section below still carries the rule text, details, and evidence — this
+    is the executive read.
+    """
+    klass = {"PASS": "pass", "REVIEW": "review", "FAIL": "fail"}.get(overall, "review")
+
+    # Build the top-issue one-liner: the worst finding's gist, italicized.
+    worst_order = {"fail": 0, "warn": 1, "info": 2, "pass": 3}
+    findings_sorted = sorted(findings, key=lambda f: worst_order.get(f.status, 4))
+    top_issue = findings_sorted[0] if findings_sorted else None
+    if overall == "PASS":
+        summary_html = "<em>Clears every gate.</em> Verify on-site before signing."
+    elif top_issue:
+        gist = _gate_one_liner(top_issue.summary, max_chars=120)
+        gate = _short_gate_label(top_issue.rule)
+        summary_html = (
+            f"Top issue — <em>{gate}</em>: {gist}"
+        )
+    else:
+        summary_html = ""
+
+    # Header line: address + BBL + ZoLa/DOB inline links
+    links = []
+    if zola_url:
+        links.append(
+            f"<a href='{zola_url}' target='_blank' "
+            f"style='color:{INDIGO};text-decoration:none;'>ZoLa ↗</a>"
+        )
+    if dob_url:
+        links.append(
+            f"<a href='{dob_url}' target='_blank' "
+            f"style='color:{INDIGO};text-decoration:none;'>DOB BIS ↗</a>"
+        )
+    bbl_part = (
+        f"<span style='font-family:Geist Mono,monospace;color:{TEXT_SECONDARY};"
+        f"font-size:0.75rem;'> · BBL {bbl}</span>"
+        if bbl else ""
+    )
+    links_part = (
+        f"<span style='margin-left:0.5rem;font-size:0.75rem;'>"
+        f"{' · '.join(links)}</span>" if links else ""
+    )
+
+    # Gates grid
+    chip_class = {"pass": "pass", "warn": "warn", "fail": "fail", "info": "info"}
+    chip_label = {"pass": "PASS", "warn": "REVIEW", "fail": "FAIL", "info": "NOTE"}
+    gate_rows = []
+    for f in findings:
+        gate = _short_gate_label(f.rule)
+        cls = chip_class.get(f.status, "info")
+        lbl = chip_label.get(f.status, "—")
+        detail = _gate_one_liner(f.summary)
+        gate_rows.append(
+            f"<div class='pca-hero__gate'>"
+            f"  <span class='pca-hero__gate-chip pca-hero__gate-chip--{cls}'>{lbl}</span>"
+            f"  <span class='pca-hero__gate-label'>{gate}</span>"
+            f"  <span class='pca-hero__gate-detail'>{detail}</span>"
+            f"</div>"
+        )
+    gates_html = "".join(gate_rows)
+
+    # Optional revenue column (when PCA overlay enabled and we have a range)
+    revenue_col = ""
+    overlay_class = ""
+    if revenue_range:
+        lo, mid, hi = revenue_range
+        conf_label = {
+            "high":   "High confidence",
+            "medium": "Medium confidence",
+            "low":    "Low confidence",
+        }.get(confidence or "", "")
+        revenue_col = (
+            f"<div>"
+            f"<div class='pca-hero__label'>EST. ANNUAL REVENUE</div>"
+            f"<div class='pca-hero__revenue-value'>${lo/1e6:.1f}M – ${hi/1e6:.1f}M</div>"
+            f"<div class='pca-hero__revenue-meta'>"
+            f"Median ${mid/1e6:.2f}M<br/>"
+            f"<em style='color:{INDIGO};font-family:Noto Serif,serif;'>{conf_label}</em>"
+            f"</div></div>"
+        )
+        overlay_class = " pca-hero-card--with-overlay"
+
+    st.markdown(
+        f"""
+        <div class="pca-hero-card pca-hero-card--{klass}{overlay_class}">
+          <div>
+            <div class="pca-hero__label">{address}{bbl_part}{links_part}</div>
+            <div class="pca-hero__verdict pca-hero__verdict--{klass}">{overall}</div>
+            <div class="pca-hero__summary">{summary_html}</div>
+          </div>
+          <div>
+            <div class="pca-hero__label">COMPLIANCE GATES (§ 72 + ZONING + C of O)</div>
+            <div class="pca-hero__gates">{gates_html}</div>
+          </div>
+          {revenue_col}
         </div>
         """,
         unsafe_allow_html=True,

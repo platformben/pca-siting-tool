@@ -194,20 +194,26 @@ if run_now and selected:
         st.stop()
 
     geo = result.geo
-    branding.overall_verdict(result.overall)
 
-    bbl_html = (
-        f"<span style='font-family:Geist Mono,monospace;font-size:0.8125rem;color:{branding.TEXT_SECONDARY};'>"
-        f" · BBL {geo.bbl}</span>"
-        if geo.bbl else ""
-    )
-    st.markdown(
-        f"<div style='font-size:0.95rem;color:{branding.NEAR_BLACK};margin-bottom:0.75rem;'>"
-        f"<strong>Resolved:</strong> {geo.address}"
-        f" <span style='font-family:Geist Mono,monospace;color:{branding.TEXT_SECONDARY};font-size:0.8125rem;'>"
-        f"({geo.lat:.5f}, {geo.lon:.5f})</span>"
-        f"{bbl_html}</div>",
-        unsafe_allow_html=True,
+    # Hero card: above-the-fold verdict + 5-gate compliance grid + (when
+    # the PCA overlay is enabled) the estimated annual revenue range. Single
+    # screen the C-suite reads to triage a candidate in/out before scrolling
+    # into the detailed sections below.
+    zola_url, dob_url = _bbl_links(geo.bbl)
+    revenue_range = None
+    confidence = None
+    if result.pca_comparables and not result.pca_comparables.is_empty():
+        revenue_range = result.pca_comparables.revenue_range_annualized()
+        confidence = result.pca_comparables.confidence()
+    branding.hero_verdict(
+        overall=result.overall,
+        findings=result.findings,
+        address=geo.address,
+        bbl=geo.bbl,
+        zola_url=zola_url,
+        dob_url=dob_url,
+        revenue_range=revenue_range,
+        confidence=confidence,
     )
     st.link_button(
         "Open in Google Maps — cross-check schools and houses of worship",
