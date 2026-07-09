@@ -369,8 +369,9 @@ if run_now and selected:
     # ---------- Compliance — evidence-only ----------
     # Hero card above already shows every gate with its chip and one-liner.
     # This section is for the analyst who wants to dig into evidence + rule
-    # text. Default-collapsed expanders only — no card chrome that duplicates
-    # the hero grid.
+    # text. Streamlit disallows nested st.expander, so the outer expander
+    # renders all findings with their evidence tables inline (still gated
+    # behind one click).
     with st.expander("Compliance — full rule text + evidence", expanded=False):
         st.caption(
             "Gates from NY Cannabis Law § 72: 1,000 / 2,000 ft from another dispensary, "
@@ -382,8 +383,8 @@ if run_now and selected:
             for d in f.details:
                 st.caption(d)
             if f.evidence:
-                with st.expander(f"Evidence ({len(f.evidence)})", expanded=False):
-                    st.dataframe(f.evidence, use_container_width=True, hide_index=True)
+                st.caption(f"Evidence ({len(f.evidence)}):")
+                st.dataframe(f.evidence, use_container_width=True, hide_index=True)
             st.markdown(
                 f"<div style='height:1px;background:{branding.BORDER_SUBTLE};"
                 f"margin:0.75rem 0;'></div>",
